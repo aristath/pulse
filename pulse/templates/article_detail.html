@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Article #{{ article.id }}{% endblock %}
+{% block content %}
+<h1>Article #{{ article.id }}</h1>
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <p><strong>URL:</strong> <a href="{{ article.url }}" target="_blank">{{ article.url }}</a></p>
+    <p><strong>Fetched:</strong> {{ article.fetched_at or "—" }}</p>
+    <p><strong>Sent to Sentinel:</strong>
+        {% if article.sent_to_sentinel %}
+            <span class="badge badge-green">Yes</span> ({{ article.sent_at }})
+        {% else %}
+            <span class="badge badge-dim">No</span>
+        {% endif %}
+    </p>
+</div>
+
+<h2>Classification Results</h2>
+
+{% if results %}
+    {% for result in results %}
+    <div class="card" style="margin-bottom: 1rem;">
+        <h2 style="margin-bottom: 0.25rem;">{{ result.model }}</h2>
+        <small style="color: var(--text-dim);">{{ result.classified_at }}</small>
+
+        {% if result.signals %}
+        <div class="signal-grid" style="margin-top: 0.75rem;">
+            {% for country, sectors in result.signals.items() %}
+            <div class="signal-card">
+                <h4>{{ country }}</h4>
+                {% for sector, score in sectors.items() %}
+                <div class="signal-row">
+                    <span>{{ sector }}</span>
+                    <span class="{% if score > 0 %}signal-pos{% elif score < 0 %}signal-neg{% endif %}">
+                        {% if score > 0 %}+{% endif %}{{ "%.3f"|format(score) }}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty" style="padding: 0.5rem 0;">No signals detected</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="card">
+        <p class="empty">Not yet classified. Waiting for classifier job.</p>
+    </div>
+{% endif %}
+
+<p style="margin-top: 1rem;"><a href="/articles">&larr; Back to articles</a></p>
+{% endblock %}

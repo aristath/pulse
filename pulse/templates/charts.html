@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Charts{% endblock %}
+{% block content %}
+<h1>Sentiment Charts</h1>
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <h2>Country Sentiment Over Time</h2>
+    <div id="chart-country" style="width: 100%; height: 450px;"></div>
+</div>
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <h2>Industry Sentiment Over Time</h2>
+    <div id="chart-industry" style="width: 100%; height: 450px;"></div>
+</div>
+
+<h1 style="margin-top: 2rem;">By Industry</h1>
+<div id="industry-charts"></div>
+
+<h1 style="margin-top: 2rem;">By Country</h1>
+<div id="country-charts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(function() {
+    const COLORS = [
+        '#6366f1', '#22c55e', '#eab308', '#ef4444', '#3b82f6',
+        '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'
+    ];
+
+    function baseOpts() {
+        return {
+            backgroundColor: 'transparent',
+            textStyle: { color: '#e0e0e8' },
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: '#12121a',
+                borderColor: '#1e1e2e',
+                textStyle: { color: '#e0e0e8' }
+            },
+            legend: {
+                type: 'scroll',
+                textStyle: { color: '#8888a0' },
+                pageTextStyle: { color: '#8888a0' },
+                top: 0
+            },
+            grid: { top: 50, left: 60, right: 20, bottom: 70 },
+            xAxis: {
+                type: 'time',
+                axisLine: { lineStyle: { color: '#1e1e2e' } },
+                axisLabel: { color: '#8888a0' }
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Sentiment',
+                nameTextStyle: { color: '#8888a0' },
+                axisLine: { lineStyle: { color: '#1e1e2e' } },
+                axisLabel: { color: '#8888a0' },
+                splitLine: { lineStyle: { color: '#1e1e2e' } }
+            },
+            dataZoom: [
+                { type: 'inside', start: 0, end: 100 },
+                {
+                    type: 'slider', start: 0, end: 100,
+                    borderColor: '#1e1e2e',
+                    backgroundColor: '#0a0a0f',
+                    fillerColor: 'rgba(99,102,241,0.15)',
+                    textStyle: { color: '#8888a0' },
+                    handleStyle: { color: '#6366f1' }
+                }
+            ],
+            series: []
+        };
+    }
+
+    function buildSeries(rows, labelKey) {
+        const groups = {};
+        for (const r of rows) {
+            const key = r[labelKey];
+            if (!groups[key]) groups[key] = [];
+            groups[key].push([r.day, r.avg_sentiment]);
+        }
+        return Object.keys(groups).sort().map((label, i) => ({
+            name: label,
+            type: 'line',
+            data: groups[label],
+            connectNulls: true,
+            smooth: true,
+            symbol: 'none',
+            lineStyle: { width: 2 },
+            color: COLORS[i % COLORS.length]
+        }));
+    }
+
+    // Summary charts
+    const chartCountry = echarts.init(document.getElementById('chart-country'));
+    const chartIndustry = echarts.init(document.getElementById('chart-industry'));
+    chartCountry.setOption(baseOpts());
+    chartIndustry.setOption(baseOpts());
+
+    // Track dynamic charts for resize
+    const allCharts = [chartCountry, chartIndustry];
+
+    function createChartCard(container, title) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.marginBottom = '1.5rem';
+        const h2 = document.createElement('h2');
+        h2.textContent = title;
+        card.appendChild(h2);
+        const div = document.createElement('div');
+        div.style.width = '100%';
+        div.style.height = '400px';
+        card.appendChild(div);
+        container.appendChild(card);
+        const chart = echarts.init(div);
+        chart.setOption(baseOpts());
+        allCharts.push(chart);
+        return chart;
+    }
+
+    // Per-industry charts (keyed by industry name)
+    const industryCharts = {};
+    // Per-country charts (keyed by country name)
+    const countryCharts = {};
+
+    async function refresh() {
+        try {
+            const [cRes, iRes, dRes] = await Promise.all([
+                fetch('/api/charts/timeseries?group_by=country'),
+                fetch('/api/charts/timeseries?group_by=industry'),
+                fetch('/api/charts/detailed')
+            ]);
+            const [cData, iData, dData] = await Promise.all([
+                cRes.json(), iRes.json(), dRes.json()
+            ]);
+
+            // Summary charts
+            chartCountry.setOption({ series: buildSeries(cData, 'label') });
+            chartIndustry.setOption({ series: buildSeries(iData, 'label') });
+
+            // Group detailed data by industry and by country
+            const byIndustry = {};
+            const byCountry = {};
+            for (const r of dData) {
+                if (!byIndustry[r.industry]) byIndustry[r.industry] = [];
+                byIndustry[r.industry].push(r);
+                if (!byCountry[r.country]) byCountry[r.country] = [];
+                byCountry[r.country].push(r);
+            }
+
+            const industryContainer = document.getElementById('industry-charts');
+            for (const industry of Object.keys(byIndustry).sort()) {
+                if (!industryCharts[industry]) {
+                    industryCharts[industry] = createChartCard(
+                        industryContainer, industry
+                    );
+                }
+                industryCharts[industry].setOption({
+                    series: buildSeries(byIndustry[industry], 'country')
+                });
+            }
+
+            const countryContainer = document.getElementById('country-charts');
+            for (const country of Object.keys(byCountry).sort()) {
+                if (!countryCharts[country]) {
+                    countryCharts[country] = createChartCard(
+                        countryContainer, country
+                    );
+                }
+                countryCharts[country].setOption({
+                    series: buildSeries(byCountry[country], 'industry')
+                });
+            }
+        } catch (e) {
+            console.error('Chart refresh failed:', e);
+        }
+    }
+
+    refresh();
+    setInterval(refresh, 30000);
+
+    window.addEventListener('resize', function() {
+        allCharts.forEach(c => c.resize());
+    });
+})();
+</script>
+{% endblock %}

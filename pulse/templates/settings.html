@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <h2>Sentinel Connection</h2>
+    <form hx-put="/api/settings/sentinel_url" hx-swap="none"
+          hx-on::after-request="document.getElementById('save-status').textContent = 'Saved'; setTimeout(() => document.getElementById('save-status').textContent = '', 2000)">
+        <div class="form-row">
+            <input type="url" name="url" value="{{ sentinel_url }}" placeholder="http://192.168.1.x:8000">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <span id="save-status" style="color: var(--green); font-size: 0.85rem;"></span>
+        </div>
+    </form>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.5rem;">
+        Pulse fetches classification labels (geographies and industries) from Sentinel's <code>/api/pulse/labels</code> endpoint.
+    </p>
+</div>
+
+<div class="card">
+    <h2>NLI Prompts</h2>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1rem;">
+        These are the hypothesis templates used by the NLI models. Leave blank to use defaults.
+    </p>
+    <form hx-put="/api/settings/prompts" hx-swap="none"
+          hx-on::after-request="document.getElementById('prompt-status').textContent = 'Saved'; setTimeout(() => document.getElementById('prompt-status').textContent = '', 2000)">
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem;">Impact / Relevance</label>
+            <input type="text" name="prompt_impact" value="{{ prompt_impact }}" placeholder="This text is about business or economics.">
+        </div>
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem;">Country Relevance <code style="font-size: 0.75rem;">{country}</code></label>
+            <input type="text" name="prompt_country" value="{{ prompt_country }}" placeholder="This article is about {country}.">
+        </div>
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem;">Sector Sentiment <code style="font-size: 0.75rem;">{sector} {country}</code></label>
+            <input type="text" name="prompt_sentiment" value="{{ prompt_sentiment }}" placeholder="This is good news for the {sector} sector in {country}.">
+        </div>
+        <div class="form-row">
+            <button type="submit" class="btn btn-primary">Save Prompts</button>
+            <span id="prompt-status" style="color: var(--green); font-size: 0.85rem;"></span>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+<div class="card">
+    {% if feeds %}
+    <table>
+        <thead>
+            <tr><th>Name</th><th>URL</th><th>Status</th><th>Added</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for feed in feeds %}
+        <tr>
+            <td>{{ feed.name or "—" }}</td>
+            <td><a href="{{ feed.url }}" target="_blank">{{ feed.url[:60] }}{% if feed.url|length > 60 %}...{% endif %}</a></td>
+            <td>
+                {% if feed.enabled %}
+                    <span class="badge badge-green">enabled</span>
+                {% else %}
+                    <span class="badge badge-dim">disabled</span>
+                {% endif %}
+            </td>
+            <td style="color: var(--text-dim); font-size: 0.85rem;">{{ feed.created_at[:10] if feed.created_at else "—" }}</td>
+            <td style="text-align: right;">
+                {% if feed.enabled %}
+                <button class="btn btn-sm" style="background: var(--border); color: var(--text-dim);"
+                    hx-patch="/api/feeds/{{ feed.id }}" hx-vals='{"enabled": false}'
+                    hx-target="#feeds-list" hx-swap="outerHTML"
+                    hx-on::after-request="htmx.ajax('GET', '/partials/feeds', '#feeds-list')">Disable</button>
+                {% else %}
+                <button class="btn btn-sm btn-primary"
+                    hx-patch="/api/feeds/{{ feed.id }}" hx-vals='{"enabled": true}'
+                    hx-target="#feeds-list" hx-swap="outerHTML"
+                    hx-on::after-request="htmx.ajax('GET', '/partials/feeds', '#feeds-list')">Enable</button>
+                {% endif %}
+                <button class="btn btn-sm btn-danger"
+                    hx-delete="/api/feeds/{{ feed.id }}"
+                    hx-target="#feeds-list" hx-swap="outerHTML"
+                    hx-confirm="Delete this feed?"
+                    hx-on::after-request="htmx.ajax('GET', '/partials/feeds', '#feeds-list')">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No feeds added yet. Add an RSS feed URL above to get started.</p>
+    {% endif %}
+</div>

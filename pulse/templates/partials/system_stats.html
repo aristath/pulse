@@ -1,0 +1,7 @@
+<span class="sys-stat" title="CPU usage">CPU {{ "%.0f"|format(sys.cpu_percent) }}%</span>
+<span class="sys-stat" title="RAM usage">RAM {{ "%.0f"|format(sys.ram_percent) }}%</span>
+{% if sys.temperature is not none %}
+<span class="sys-stat" title="CPU temperature">{{ "%.0f"|format(sys.temperature) }}&deg;C</span>
+{% else %}
+<span class="sys-stat sys-stat-dim" title="Temperature unavailable">Temp N/A</span>
+{% endif %}

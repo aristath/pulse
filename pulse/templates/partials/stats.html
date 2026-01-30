@@ -1,0 +1,62 @@
+<div class="grid">
+    <div class="card">
+        <div class="label">Total Articles</div>
+        <div class="value">{{ stats.total_articles }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Processed</div>
+        <div class="value green">{{ stats.processed_articles }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Unprocessed</div>
+        <div class="value yellow">{{ stats.unprocessed_articles }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Sent to Sentinel</div>
+        <div class="value">{{ stats.sent_articles }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Feeds</div>
+        <div class="value">{{ stats.total_feeds }}</div>
+    </div>
+</div>
+
+<h2>Impact Scoring</h2>
+<div class="grid">
+    <div class="card">
+        <div class="label">Scored</div>
+        <div class="value">{{ stats.impact_scored }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Relevant (≥0.5)</div>
+        <div class="value green">{{ stats.impact_relevant }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Unscored</div>
+        <div class="value yellow">{{ stats.impact_unscored }}</div>
+    </div>
+</div>
+
+{% if stats.per_model %}
+<h2>Per-Model Results</h2>
+<div class="card">
+    <table>
+        <thead><tr><th>Model</th><th>Articles Classified</th></tr></thead>
+        <tbody>
+        {% for model, count in stats.per_model.items() %}
+        <tr><td>{{ model }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% for model_name, status in processing.items() %}
+{% if status.article_id %}
+<div class="processing">
+    <span class="pulse-dot"></span>
+    <strong>{{ model_name }}</strong> &mdash; article #{{ status.article_id }}
+    <br><small style="color: var(--text-dim);">{{ status.article_url }}</small>
+</div>
+{% endif %}
+{% endfor %}

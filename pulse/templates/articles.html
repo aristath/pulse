@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Articles{% endblock %}
+{% block content %}
+<h1>Articles</h1>
+
+<div style="margin-bottom: 1rem; display: flex; gap: 0.75rem;">
+    <button class="btn btn-primary" hx-post="/api/fetch" hx-swap="none"
+        hx-on::after-request="window.location.reload()">Fetch Now</button>
+</div>
+
+<div class="card">
+    {% if articles %}
+    <table>
+        <thead>
+            <tr><th>ID</th><th>URL</th><th>Fetched</th><th>Sent</th></tr>
+        </thead>
+        <tbody>
+        {% for article in articles %}
+        <tr>
+            <td>{{ article.id }}</td>
+            <td><a href="/articles/{{ article.id }}">{{ article.url[:70] }}{% if article.url|length > 70 %}...{% endif %}</a></td>
+            <td style="color: var(--text-dim); font-size: 0.85rem;">{{ article.fetched_at[:16] if article.fetched_at else "—" }}</td>
+            <td>
+                {% if article.sent_to_sentinel %}
+                    <span class="badge badge-green">sent</span>
+                {% else %}
+                    <span class="badge badge-dim">pending</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No articles yet. Add some RSS feeds and wait for the fetcher to run.</p>
+    {% endif %}
+</div>
+{% endblock %}
