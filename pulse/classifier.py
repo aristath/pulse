@@ -29,6 +29,20 @@ processing_status = {}
 # Current thermal throttle delay (seconds) — exposed for the UI
 thermal_throttle: dict = {"delay": 0.0, "temp": None}
 
+# --- Worker infrastructure ---
+_workers_running = False
+_worker_tasks: list[asyncio.Task] = []
+IDLE_SLEEP = 2.0
+
+# Each worker pulls tasks in priority order.
+# Capabilities: (task_type, model_name_or_None)
+WORKER_CONFIGS = [
+    ("modernbert-nli", [("classify", "modernbert-nli"), ("impact", None), ("company_sentiment", "modernbert-nli")]),
+    ("deberta-nli",    [("classify", "deberta-nli"), ("company_sentiment", "deberta-nli")]),
+    ("finbert",        [("classify", "finbert")]),
+    ("company-scanner",[("scan", None)]),
+]
+
 
 def _thermal_delay() -> float:
     """Compute inference pause based on CPU package temperature.
@@ -70,10 +84,11 @@ class EnsembleClassifier:
         self._impact_scorer = ImpactScorer()
         self._company_scanner = CompanyScanner()
         self._ticker_aliases: dict[str, list[str]] = {}
-        self._executor = ThreadPoolExecutor(max_workers=3)
+        self._executor = ThreadPoolExecutor(max_workers=4)
         self._loaded = False
         self._countries: list[str] = []
         self._sectors: dict[str, list[str]] = {}
+        self._company_sentiment_lock = asyncio.Lock()
 
     @property
     def model_names(self) -> list[str]:
@@ -386,77 +401,87 @@ class EnsembleClassifier:
             await asyncio.sleep(delay)
         return True
 
-    async def classify_next_company_sentiment(self) -> bool:
+    async def classify_next_company_sentiment(self, model_name: str | None = None) -> bool:
         """Pick an unscored company_results row, run NLI sentiment, save.
 
         Returns True if a row was scored, False if none available.
+        Guarded by a lock so only one worker processes at a time.
         """
         if not self._loaded:
             return False
 
-        row = await get_next_unscored_company_result()
-        if not row:
+        # Multiple workers may have this capability — skip if another is active
+        if self._company_sentiment_lock.locked():
             return False
 
-        article_id = row["article_id"]
-        ticker = row["ticker"]
-        article_url = row["article_url"]
+        async with self._company_sentiment_lock:
+            row = await get_next_unscored_company_result()
+            if not row:
+                return False
 
-        # Find company name from ticker_aliases
-        company_name = ticker
-        for name_candidate in self._ticker_aliases.get(ticker, []):
-            company_name = name_candidate
-            break
+            article_id = row["article_id"]
+            ticker = row["ticker"]
+            article_url = row["article_url"]
 
-        prompt_company = await get_setting("prompt_company") or ""
+            # Find company name from ticker_aliases
+            company_name = ticker
+            for name_candidate in self._ticker_aliases.get(ticker, []):
+                company_name = name_candidate
+                break
 
-        processing_status["company-sentiment"] = {
-            "article_id": article_id,
-            "article_url": article_url,
-            "started_at": time.time(),
-        }
+            prompt_company = await get_setting("prompt_company") or ""
 
-        logger.info("[company-sentiment] Scoring %s for article %d", ticker, article_id)
+            processing_status["company-sentiment"] = {
+                "article_id": article_id,
+                "article_url": article_url,
+                "started_at": time.time(),
+            }
 
-        content, _ = await fetch_article_content(article_url)
-        if not content:
-            logger.warning("[company-sentiment] Could not fetch content for article %d", article_id)
-            await save_company_sentiment(article_id, ticker, 0.0, 0.0)
+            logger.info("[company-sentiment] Scoring %s for article %d", ticker, article_id)
+
+            content, _ = await fetch_article_content(article_url)
+            if not content:
+                logger.warning("[company-sentiment] Could not fetch content for article %d", article_id)
+                await save_company_sentiment(article_id, ticker, 0.0, 0.0)
+                self._clear_model_status("company-sentiment")
+                return True
+
+            # Use specified model, or fall back to any available NLI model
+            model = None
+            if model_name:
+                model = self._get_model(model_name)
+            if not model:
+                model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
+            if not model:
+                self._clear_model_status("company-sentiment")
+                return False
+
+            tpl = prompt_company or "This is good news for {company}."
+            hypothesis = tpl.format(company=company_name)
+
+            loop = asyncio.get_event_loop()
+            try:
+                entail_scores, contra_scores = await loop.run_in_executor(
+                    self._executor,
+                    model._nli_batch_full,
+                    model.truncate(content, 6000),
+                    [hypothesis],
+                )
+                sentiment = round(entail_scores[0] - contra_scores[0], 4)
+                sentiment = max(-1.0, min(1.0, sentiment))
+                impact = round(max(entail_scores[0], contra_scores[0]), 4)
+                await save_company_sentiment(article_id, ticker, sentiment, impact)
+                logger.info("[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
+                            ticker, article_id, sentiment, impact)
+            except Exception as e:
+                logger.error("[company-sentiment] Failed for %s article %d: %s", ticker, article_id, e)
+                await save_company_sentiment(article_id, ticker, 0.0, 0.0)
+
             self._clear_model_status("company-sentiment")
+            delay = _thermal_delay()
+            if delay > 0:
+                await asyncio.sleep(delay)
             return True
-
-        # Use an NLI model that supports _nli_batch_full
-        model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
-        if not model:
-            self._clear_model_status("company-sentiment")
-            return False
-
-        tpl = prompt_company or "This is good news for {company}."
-        hypothesis = tpl.format(company=company_name)
-
-        loop = asyncio.get_event_loop()
-        try:
-            entail_scores, contra_scores = await loop.run_in_executor(
-                self._executor,
-                model._nli_batch_full,
-                model.truncate(content, 6000),
-                [hypothesis],
-            )
-            sentiment = round(entail_scores[0] - contra_scores[0], 4)
-            sentiment = max(-1.0, min(1.0, sentiment))
-            impact = round(max(entail_scores[0], contra_scores[0]), 4)
-            await save_company_sentiment(article_id, ticker, sentiment, impact)
-            logger.info("[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
-                        ticker, article_id, sentiment, impact)
-        except Exception as e:
-            logger.error("[company-sentiment] Failed for %s article %d: %s", ticker, article_id, e)
-            await save_company_sentiment(article_id, ticker, 0.0, 0.0)
-
-        self._clear_model_status("company-sentiment")
-        delay = _thermal_delay()
-        if delay > 0:
-            await asyncio.sleep(delay)
-        return True
 
     def _get_model(self, name: str) -> BaseModel | None:
         for m in self._models:
@@ -471,6 +496,65 @@ class EnsembleClassifier:
             "started_at": None,
         }
 
+    async def _worker_loop(self, worker_name: str, capabilities: list[tuple[str, str | None]]):
+        """Pull-based worker: try each capability in priority order, execute first available, sleep if none."""
+        # Wait for models to load
+        while _workers_running and not self._loaded:
+            await asyncio.sleep(1.0)
+
+        logger.info("[worker:%s] Started", worker_name)
+        try:
+            while _workers_running:
+                did_work = False
+                for task_type, model in capabilities:
+                    if not _workers_running:
+                        break
+                    try:
+                        if task_type == "classify" and model:
+                            did_work = await self.classify_next_for_model(model)
+                        elif task_type == "impact":
+                            did_work = await self.score_next_impact()
+                        elif task_type == "scan":
+                            did_work = await self.scan_next_article()
+                        elif task_type == "company_sentiment":
+                            did_work = await self.classify_next_company_sentiment(model_name=model)
+                    except Exception:
+                        logger.exception("[worker:%s] Error in %s", worker_name, task_type)
+                    if did_work:
+                        break
+
+                if not did_work:
+                    await asyncio.sleep(IDLE_SLEEP)
+        except asyncio.CancelledError:
+            pass
+
+        logger.info("[worker:%s] Stopped", worker_name)
+
 
 # Singleton
 ensemble = EnsembleClassifier()
+
+
+def start_workers():
+    """Launch all pull-based worker loops as async tasks."""
+    global _workers_running
+    _workers_running = True
+    for worker_name, capabilities in WORKER_CONFIGS:
+        task = asyncio.create_task(
+            ensemble._worker_loop(worker_name, capabilities),
+            name=f"worker:{worker_name}",
+        )
+        _worker_tasks.append(task)
+    logger.info("Started %d workers", len(_worker_tasks))
+
+
+async def stop_workers():
+    """Signal all workers to stop and wait for them to finish."""
+    global _workers_running
+    _workers_running = False
+    for task in _worker_tasks:
+        task.cancel()
+    if _worker_tasks:
+        await asyncio.gather(*_worker_tasks, return_exceptions=True)
+    _worker_tasks.clear()
+    logger.info("All workers stopped")

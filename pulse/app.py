@@ -15,7 +15,7 @@ from pydantic import BaseModel as PydanticModel
 from sse_starlette.sse import EventSourceResponse
 
 from pulse import database as db
-from pulse.classifier import ensemble, processing_status
+from pulse.classifier import ensemble, processing_status, start_workers, stop_workers
 
 def _model_count() -> int:
     return max(len(ensemble.model_names), 1)
@@ -42,7 +42,9 @@ async def lifespan(app: FastAPI):
     thread.start()
     logger.info("Model loading started in background")
     start_scheduler()
+    start_workers()
     yield
+    await stop_workers()
     stop_scheduler()
     logger.info("Shutdown complete")
 
