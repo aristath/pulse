@@ -342,15 +342,17 @@ class EnsembleClassifier:
 
         Returns True if an article was scanned, False if none available.
         """
-        if not self._company_scanner.ready:
+        if self._company_scanner._model is None:
             return False
+
+        if not self._company_scanner.ready:
+            await self.fetch_aliases()
+            if not self._company_scanner.ready:
+                return False
 
         all_aliases = self._company_scanner.all_aliases
         if not all_aliases:
-            await self.fetch_aliases()
-            all_aliases = self._company_scanner.all_aliases
-            if not all_aliases:
-                return False
+            return False
 
         # Find an article that hasn't been scanned for any alias yet.
         # We use the first alias as a proxy — all aliases are recorded together.
