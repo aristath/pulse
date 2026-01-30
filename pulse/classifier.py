@@ -37,7 +37,7 @@ IDLE_SLEEP = 2.0
 # Each worker pulls tasks in priority order.
 # Capabilities: (task_type, model_name_or_None)
 WORKER_CONFIGS = [
-    ("modernbert-nli", [("classify", "modernbert-nli"), ("impact", None), ("company_sentiment", "modernbert-nli")]),
+    ("modernbert-nli", [("impact", None), ("classify", "modernbert-nli"), ("company_sentiment", "modernbert-nli")]),
     ("deberta-nli",    [("classify", "deberta-nli"), ("company_sentiment", "deberta-nli")]),
     ("finbert",        [("classify", "finbert")]),
     ("company-scanner",[("scan", None)]),
@@ -347,7 +347,10 @@ class EnsembleClassifier:
 
         all_aliases = self._company_scanner.all_aliases
         if not all_aliases:
-            return False
+            await self.fetch_aliases()
+            all_aliases = self._company_scanner.all_aliases
+            if not all_aliases:
+                return False
 
         # Find an article that hasn't been scanned for any alias yet.
         # We use the first alias as a proxy — all aliases are recorded together.
