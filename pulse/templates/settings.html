@@ -37,6 +37,10 @@
             <label style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem;">Sector Sentiment <code style="font-size: 0.75rem;">{sector} {country}</code></label>
             <input type="text" name="prompt_sentiment" value="{{ prompt_sentiment }}" placeholder="This is good news for the {sector} sector in {country}.">
         </div>
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem;">Company Sentiment <code style="font-size: 0.75rem;">{company}</code></label>
+            <input type="text" name="prompt_company" value="{{ prompt_company }}" placeholder="This is good news for {company}.">
+        </div>
         <div class="form-row">
             <button type="submit" class="btn btn-primary">Save Prompts</button>
             <span id="prompt-status" style="color: var(--green); font-size: 0.85rem;"></span>

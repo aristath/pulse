@@ -11,9 +11,13 @@ from pulse.models.modernbert import ModernBERTNLI
 from pulse.models.deberta import DeBERTaNLI
 from pulse.models.finbert import FinBERT
 from pulse.models.impact import ImpactScorer
+from pulse.models.gliner import CompanyScanner
 from pulse.database import (
     get_unprocessed_article_for_model, get_next_article_for_impact,
     get_setting, save_result, save_impact, update_article_date,
+    save_alias_scan, get_unscanned_article_for_alias,
+    save_company_mention, get_next_unscored_company_result,
+    save_company_sentiment,
 )
 from pulse.fetcher import fetch_article_content
 
@@ -64,6 +68,8 @@ class EnsembleClassifier:
             FinBERT(),
         ]
         self._impact_scorer = ImpactScorer()
+        self._company_scanner = CompanyScanner()
+        self._ticker_aliases: dict[str, list[str]] = {}
         self._executor = ThreadPoolExecutor(max_workers=3)
         self._loaded = False
         self._countries: list[str] = []
@@ -102,6 +108,21 @@ class EnsembleClassifier:
                     "article_url": None,
                     "started_at": None,
                 }
+            # Load company scanner
+            try:
+                self._company_scanner.load()
+                processing_status["company-scanner"] = {
+                    "article_id": None,
+                    "article_url": None,
+                    "started_at": None,
+                }
+                processing_status["company-sentiment"] = {
+                    "article_id": None,
+                    "article_url": None,
+                    "started_at": None,
+                }
+            except Exception:
+                logger.exception("Failed to load CompanyScanner")
             logger.info("Loaded %d models (%d failed)", len(self._models), len(failed))
         else:
             logger.error("No models loaded successfully")
@@ -254,6 +275,186 @@ class EnsembleClassifier:
         delay = _thermal_delay()
         if delay > 0:
             logger.info("[impact] Thermal throttle: %.0fs pause (CPU %.0f°C)", delay, thermal_throttle["temp"])
+            await asyncio.sleep(delay)
+        return True
+
+    async def fetch_aliases(self) -> bool:
+        """Fetch company aliases from Sentinel API and update scanner embeddings.
+
+        Returns True if aliases were fetched, False otherwise.
+        """
+        sentinel_url = await get_setting("sentinel_url")
+        if not sentinel_url:
+            logger.warning("Sentinel URL not configured — skipping alias fetch")
+            return False
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{sentinel_url}/api/securities/aliases")
+                resp.raise_for_status()
+                data = resp.json()
+
+            ticker_aliases: dict[str, list[str]] = {}
+            for entry in data:
+                symbol = entry.get("symbol")
+                name = entry.get("name")
+                if not symbol or not name:
+                    continue
+                aliases = [name]
+                raw_aliases = entry.get("aliases")
+                if raw_aliases:
+                    aliases.extend(a.strip() for a in raw_aliases.split(",") if a.strip())
+                ticker_aliases[symbol] = aliases
+
+            self._ticker_aliases = ticker_aliases
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self._executor,
+                self._company_scanner.update_aliases,
+                ticker_aliases,
+            )
+
+            logger.info("Aliases from Sentinel: %d tickers, %d aliases total",
+                        len(ticker_aliases), len(self._company_scanner.all_aliases))
+            return True
+        except Exception:
+            logger.exception("Failed to fetch aliases from Sentinel")
+            return False
+
+    async def scan_next_article(self) -> bool:
+        """Find an article with unscanned aliases, scan it, record results.
+
+        Returns True if an article was scanned, False if none available.
+        """
+        if not self._company_scanner.ready:
+            return False
+
+        all_aliases = self._company_scanner.all_aliases
+        if not all_aliases:
+            return False
+
+        # Find an article that hasn't been scanned for any alias yet.
+        # We use the first alias as a proxy — all aliases are recorded together.
+        article = await get_unscanned_article_for_alias(all_aliases[0])
+        if not article:
+            return False
+
+        processing_status["company-scanner"] = {
+            "article_id": article["id"],
+            "article_url": article["url"],
+            "started_at": time.time(),
+        }
+
+        logger.info("[company-scanner] Scanning article %d: %s", article["id"], article["url"])
+
+        content, published_at = await fetch_article_content(article["url"])
+        if published_at and not article.get("published_at"):
+            await update_article_date(article["id"], published_at)
+
+        matched_aliases: list[str] = []
+        if content:
+            loop = asyncio.get_event_loop()
+            try:
+                matched_aliases = await loop.run_in_executor(
+                    self._executor,
+                    self._company_scanner.scan,
+                    content,
+                )
+            except Exception as e:
+                logger.error("[company-scanner] Failed on article %d: %s", article["id"], e)
+
+        # Record alias_scans for ALL aliases (marks article as fully scanned)
+        for alias in all_aliases:
+            await save_alias_scan(article["id"], alias)
+
+        # Save company mentions for matched aliases
+        matched_tickers = set()
+        alias_to_ticker = self._company_scanner.alias_to_ticker
+        for alias in matched_aliases:
+            ticker = alias_to_ticker.get(alias)
+            if ticker and ticker not in matched_tickers:
+                matched_tickers.add(ticker)
+                await save_company_mention(article["id"], ticker)
+
+        if matched_tickers:
+            logger.info("[company-scanner] Article %d: matched %s", article["id"], matched_tickers)
+
+        self._clear_model_status("company-scanner")
+        delay = _thermal_delay()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        return True
+
+    async def classify_next_company_sentiment(self) -> bool:
+        """Pick an unscored company_results row, run NLI sentiment, save.
+
+        Returns True if a row was scored, False if none available.
+        """
+        if not self._loaded:
+            return False
+
+        row = await get_next_unscored_company_result()
+        if not row:
+            return False
+
+        article_id = row["article_id"]
+        ticker = row["ticker"]
+        article_url = row["article_url"]
+
+        # Find company name from ticker_aliases
+        company_name = ticker
+        for name_candidate in self._ticker_aliases.get(ticker, []):
+            company_name = name_candidate
+            break
+
+        prompt_company = await get_setting("prompt_company") or ""
+
+        processing_status["company-sentiment"] = {
+            "article_id": article_id,
+            "article_url": article_url,
+            "started_at": time.time(),
+        }
+
+        logger.info("[company-sentiment] Scoring %s for article %d", ticker, article_id)
+
+        content, _ = await fetch_article_content(article_url)
+        if not content:
+            logger.warning("[company-sentiment] Could not fetch content for article %d", article_id)
+            await save_company_sentiment(article_id, ticker, 0.0, 0.0)
+            self._clear_model_status("company-sentiment")
+            return True
+
+        # Use an NLI model that supports _nli_batch_full
+        model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
+        if not model:
+            self._clear_model_status("company-sentiment")
+            return False
+
+        tpl = prompt_company or "This is good news for {company}."
+        hypothesis = tpl.format(company=company_name)
+
+        loop = asyncio.get_event_loop()
+        try:
+            entail_scores, contra_scores = await loop.run_in_executor(
+                self._executor,
+                model._nli_batch_full,
+                model.truncate(content, 6000),
+                [hypothesis],
+            )
+            sentiment = round(entail_scores[0] - contra_scores[0], 4)
+            sentiment = max(-1.0, min(1.0, sentiment))
+            impact = round(max(entail_scores[0], contra_scores[0]), 4)
+            await save_company_sentiment(article_id, ticker, sentiment, impact)
+            logger.info("[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
+                        ticker, article_id, sentiment, impact)
+        except Exception as e:
+            logger.error("[company-sentiment] Failed for %s article %d: %s", ticker, article_id, e)
+            await save_company_sentiment(article_id, ticker, 0.0, 0.0)
+
+        self._clear_model_status("company-sentiment")
+        delay = _thermal_delay()
+        if delay > 0:
             await asyncio.sleep(delay)
         return True
 

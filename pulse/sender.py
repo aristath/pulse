@@ -2,7 +2,10 @@ import json
 import logging
 import httpx
 
-from pulse.database import get_unsent_articles, get_results_for_article, mark_sent
+from pulse.database import (
+    get_unsent_articles, get_results_for_article,
+    get_company_results_for_article, mark_sent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +26,22 @@ async def send_to_sentinel():
                 if not results:
                     continue
 
+                # Build company signals
+                company_results = await get_company_results_for_article(article["id"])
+                company_signals = {}
+                for cr in company_results:
+                    company_signals[cr["ticker"]] = {
+                        "sentiment": cr["sentiment"],
+                        "impact": cr["impact"],
+                    }
+
                 payload = {
                     "article_id": article["id"],
                     "url": article["url"],
                     "models": {
                         r["model"]: r["signals"] for r in results
                     },
+                    "company_signals": company_signals,
                 }
 
                 resp = await client.post(

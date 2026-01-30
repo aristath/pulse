@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 _model_running: set[str] = set()
 _impact_running = False
+_scanning_running = False
+_company_sentiment_running = False
 
 
 async def _fetch_job():
@@ -67,12 +69,55 @@ async def _refresh_labels_job():
         logger.exception("Label refresh failed")
 
 
+async def _refresh_aliases_job():
+    """Scheduled job: refresh company aliases from Sentinel."""
+    try:
+        await ensemble.fetch_aliases()
+    except Exception:
+        logger.exception("Alias refresh failed")
+
+
+async def _scan_job():
+    """Scheduled job: scan next article for company mentions."""
+    global _scanning_running
+    if not ensemble._loaded or _scanning_running:
+        return
+    _scanning_running = True
+    try:
+        processed = await ensemble.scan_next_article()
+        if not processed:
+            logger.debug("No unscanned articles for company scanner")
+    except Exception:
+        logger.exception("Company scan failed")
+    finally:
+        _scanning_running = False
+
+
+async def _company_sentiment_job():
+    """Scheduled job: classify sentiment for next unscored company mention."""
+    global _company_sentiment_running
+    if not ensemble._loaded or _company_sentiment_running:
+        return
+    _company_sentiment_running = True
+    try:
+        processed = await ensemble.classify_next_company_sentiment()
+        if not processed:
+            logger.debug("No unscored company results")
+    except Exception:
+        logger.exception("Company sentiment classification failed")
+    finally:
+        _company_sentiment_running = False
+
+
 def start_scheduler():
     """Configure and start the APScheduler."""
     scheduler.add_job(_fetch_job, "interval", minutes=5, id="fetch_rss", name="Fetch RSS feeds")
     scheduler.add_job(_impact_job, "interval", seconds=5, id="impact", name="Score article impact")
     scheduler.add_job(_classify_job, "interval", seconds=5, id="classify", name="Classify articles")
     scheduler.add_job(_refresh_labels_job, "interval", minutes=30, id="refresh_labels", name="Refresh labels")
+    scheduler.add_job(_refresh_aliases_job, "interval", minutes=30, id="refresh_aliases", name="Refresh aliases")
+    scheduler.add_job(_scan_job, "interval", seconds=5, id="scan_companies", name="Scan company mentions")
+    scheduler.add_job(_company_sentiment_job, "interval", seconds=5, id="company_sentiment", name="Company sentiment")
     scheduler.start()
     logger.info("Scheduler started")
 

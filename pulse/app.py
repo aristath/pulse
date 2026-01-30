@@ -99,12 +99,14 @@ async def settings_page(request: Request):
     prompt_impact = await db.get_setting("prompt_impact") or ""
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
+    prompt_company = await db.get_setting("prompt_company") or ""
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "sentinel_url": sentinel_url,
         "prompt_impact": prompt_impact,
         "prompt_country": prompt_country,
         "prompt_sentiment": prompt_sentiment,
+        "prompt_company": prompt_company,
     })
 
 
@@ -114,10 +116,12 @@ async def article_detail(request: Request, article_id: int):
     if not article:
         raise HTTPException(404)
     results = await db.get_results_for_article(article_id)
+    company_results = await db.get_company_results_for_article(article_id)
     return templates.TemplateResponse("article_detail.html", {
         "request": request,
         "article": article,
         "results": results,
+        "company_results": company_results,
     })
 
 
@@ -184,6 +188,11 @@ async def api_list_articles(limit: int = 50, offset: int = 0, processed: bool = 
 @app.get("/api/articles/{article_id}/results")
 async def api_article_results(article_id: int):
     return await db.get_results_for_article(article_id)
+
+
+@app.get("/api/articles/{article_id}/company-results")
+async def api_article_company_results(article_id: int):
+    return await db.get_company_results_for_article(article_id)
 
 
 @app.get("/api/charts/timeseries")
@@ -289,15 +298,18 @@ async def api_set_prompts(
     prompt_impact: str = Form(None),
     prompt_country: str = Form(None),
     prompt_sentiment: str = Form(None),
+    prompt_company: str = Form(None),
 ):
     if prompt_impact is None:
         body = await request.json()
         prompt_impact = body.get("prompt_impact", "")
         prompt_country = body.get("prompt_country", "")
         prompt_sentiment = body.get("prompt_sentiment", "")
+        prompt_company = body.get("prompt_company", "")
     await db.set_setting("prompt_impact", (prompt_impact or "").strip())
     await db.set_setting("prompt_country", (prompt_country or "").strip())
     await db.set_setting("prompt_sentiment", (prompt_sentiment or "").strip())
+    await db.set_setting("prompt_company", (prompt_company or "").strip())
     return {"ok": True}
 
 

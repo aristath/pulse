@@ -50,5 +50,34 @@
     </div>
 {% endif %}
 
+<h2>Company Signals</h2>
+
+{% if company_results %}
+    <div class="card" style="margin-bottom: 1rem;">
+        <div class="signal-grid" style="margin-top: 0.75rem;">
+            {% for cr in company_results %}
+            <div class="signal-card">
+                <h4>{{ cr.ticker }}</h4>
+                <div class="signal-row">
+                    <span>Sentiment</span>
+                    <span class="{% if cr.sentiment > 0 %}signal-pos{% elif cr.sentiment < 0 %}signal-neg{% endif %}">
+                        {% if cr.sentiment > 0 %}+{% endif %}{{ "%.3f"|format(cr.sentiment) }}
+                    </span>
+                </div>
+                <div class="signal-row">
+                    <span>Impact</span>
+                    <span>{{ "%.3f"|format(cr.impact) }}</span>
+                </div>
+                <small style="color: var(--text-dim);">{{ cr.classified_at }}</small>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+{% else %}
+    <div class="card">
+        <p class="empty">No company signals detected yet.</p>
+    </div>
+{% endif %}
+
 <p style="margin-top: 1rem;"><a href="/articles">&larr; Back to articles</a></p>
 {% endblock %}

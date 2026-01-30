@@ -38,9 +38,29 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS alias_scans (
+    id INTEGER PRIMARY KEY,
+    article_id INTEGER NOT NULL REFERENCES articles(id),
+    alias TEXT NOT NULL,
+    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(article_id, alias)
+);
+
+CREATE TABLE IF NOT EXISTS company_results (
+    id INTEGER PRIMARY KEY,
+    article_id INTEGER NOT NULL REFERENCES articles(id),
+    ticker TEXT NOT NULL,
+    sentiment REAL,
+    impact REAL,
+    classified_at TIMESTAMP,
+    UNIQUE(article_id, ticker)
+);
+
 CREATE INDEX IF NOT EXISTS idx_results_article ON results(article_id);
 CREATE INDEX IF NOT EXISTS idx_results_model ON results(model);
 CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url);
+CREATE INDEX IF NOT EXISTS idx_alias_scans_article ON alias_scans(article_id);
+CREATE INDEX IF NOT EXISTS idx_company_results_article ON company_results(article_id);
 """
 
 
@@ -348,6 +368,17 @@ async def get_stats(model_count: int = 1) -> dict:
             "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= 0.5"
         )).fetchone())[0]
 
+        # Company scan stats
+        company_scanned = (await (await db.execute(
+            "SELECT COUNT(DISTINCT article_id) FROM alias_scans"
+        )).fetchone())[0]
+        company_mentions = (await (await db.execute(
+            "SELECT COUNT(*) FROM company_results"
+        )).fetchone())[0]
+        company_scored = (await (await db.execute(
+            "SELECT COUNT(*) FROM company_results WHERE sentiment IS NOT NULL"
+        )).fetchone())[0]
+
         return {
             "total_articles": total,
             "processed_articles": processed,
@@ -358,6 +389,9 @@ async def get_stats(model_count: int = 1) -> dict:
             "impact_scored": impact_scored,
             "impact_relevant": impact_relevant,
             "impact_unscored": total - impact_scored,
+            "company_scanned": company_scanned,
+            "company_mentions": company_mentions,
+            "company_scored": company_scored,
         }
     finally:
         await db.close()
@@ -427,6 +461,102 @@ async def get_sentiment_detailed() -> list[dict]:
     db = await get_db()
     try:
         cursor = await db.execute(sql)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+# --- Settings ---
+
+# --- Alias Scans & Company Results ---
+
+async def save_alias_scan(article_id: int, alias: str):
+    """Record that an article has been scanned for a given alias."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO alias_scans (article_id, alias) VALUES (?, ?)",
+            (article_id, alias),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_unscanned_article_for_alias(alias: str) -> dict | None:
+    """Get an article not yet scanned for this alias, with impact >= 0.5, highest impact first."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("""
+            SELECT a.* FROM articles a
+            LEFT JOIN alias_scans s ON a.id = s.article_id AND s.alias = ?
+            WHERE s.id IS NULL
+              AND a.impact IS NOT NULL
+              AND a.impact >= 0.5
+            ORDER BY a.impact DESC
+            LIMIT 1
+        """, (alias,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def save_company_mention(article_id: int, ticker: str):
+    """Record a company mention (with NULL sentiment until scored)."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO company_results (article_id, ticker) VALUES (?, ?)",
+            (article_id, ticker),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_next_unscored_company_result() -> dict | None:
+    """Get a company_results row where sentiment is NULL."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("""
+            SELECT cr.*, a.url as article_url
+            FROM company_results cr
+            JOIN articles a ON cr.article_id = a.id
+            WHERE cr.sentiment IS NULL
+            ORDER BY a.impact DESC
+            LIMIT 1
+        """)
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def save_company_sentiment(article_id: int, ticker: str, sentiment: float, impact: float):
+    """Update sentiment and impact for a company_results row."""
+    db = await get_db()
+    try:
+        await db.execute(
+            """UPDATE company_results
+               SET sentiment = ?, impact = ?, classified_at = CURRENT_TIMESTAMP
+               WHERE article_id = ? AND ticker = ?""",
+            (sentiment, impact, article_id, ticker),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_company_results_for_article(article_id: int) -> list[dict]:
+    """Get scored company results for an article."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM company_results WHERE article_id = ? AND sentiment IS NOT NULL ORDER BY ticker",
+            (article_id,),
+        )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
     finally:
