@@ -37,6 +37,22 @@
     </div>
 </div>
 
+<h2>Company Scanning</h2>
+<div class="grid">
+    <div class="card">
+        <div class="label">Articles Scanned</div>
+        <div class="value">{{ stats.company_scanned }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Mentions Found</div>
+        <div class="value green">{{ stats.company_mentions }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Sentiment Scored</div>
+        <div class="value">{{ stats.company_scored }}</div>
+    </div>
+</div>
+
 {% if stats.per_model %}
 <h2>Per-Model Results</h2>
 <div class="card">
