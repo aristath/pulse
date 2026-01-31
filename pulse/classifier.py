@@ -482,9 +482,6 @@ class EnsembleClassifier:
         await save_scanned_aliases(article["id"], all_aliases)
 
         self._clear_model_status("company-scanner")
-        delay = _thermal_delay()
-        if delay > 0:
-            await asyncio.sleep(delay)
         return True
 
     async def validate_next_company_match(self, model_name: str | None = None) -> bool:
@@ -554,8 +551,9 @@ class EnsembleClassifier:
                 model.truncate(content, 6000),
                 [hypothesis],
             )
+            validate_threshold = float(await get_setting("validate_threshold") or "0.5")
             entail = entail_scores[0]
-            if entail >= 0.5:
+            if entail >= validate_threshold:
                 await mark_company_result_validated(article_id, ticker)
                 logger.info(
                     "[validate] ACCEPTED %s for article %d (entail=%.4f)",

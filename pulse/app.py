@@ -86,7 +86,9 @@ async def dashboard(request: Request):
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
+    classify_threshold = await db.get_setting("classify_threshold") or "0.5"
     scan_threshold = await db.get_setting("scan_threshold") or "0.3"
+    validate_threshold = await db.get_setting("validate_threshold") or "0.5"
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -101,7 +103,9 @@ async def dashboard(request: Request):
             "prompt_country": prompt_country,
             "prompt_sentiment": prompt_sentiment,
             "prompt_company": prompt_company,
+            "classify_threshold": classify_threshold,
             "scan_threshold": scan_threshold,
+            "validate_threshold": validate_threshold,
         },
     )
 
@@ -332,12 +336,18 @@ async def api_set_prompts(
 @app.put("/api/settings/thresholds")
 async def api_set_thresholds(
     request: Request,
+    classify_threshold: str = Form(None),
     scan_threshold: str = Form(None),
+    validate_threshold: str = Form(None),
 ):
     if scan_threshold is None:
         body = await request.json()
+        classify_threshold = body.get("classify_threshold", "0.5")
         scan_threshold = body.get("scan_threshold", "0.3")
+        validate_threshold = body.get("validate_threshold", "0.5")
+    await db.set_setting("classify_threshold", (classify_threshold or "0.5").strip())
     await db.set_setting("scan_threshold", (scan_threshold or "0.3").strip())
+    await db.set_setting("validate_threshold", (validate_threshold or "0.5").strip())
     return {"ok": True}
 
 
@@ -375,7 +385,9 @@ async def partial_stats(request: Request):
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
+    classify_threshold = await db.get_setting("classify_threshold") or "0.5"
     scan_threshold = await db.get_setting("scan_threshold") or "0.3"
+    validate_threshold = await db.get_setting("validate_threshold") or "0.5"
     return templates.TemplateResponse(
         "partials/stats.html",
         {
@@ -390,7 +402,9 @@ async def partial_stats(request: Request):
             "prompt_country": prompt_country,
             "prompt_sentiment": prompt_sentiment,
             "prompt_company": prompt_company,
+            "classify_threshold": classify_threshold,
             "scan_threshold": scan_threshold,
+            "validate_threshold": validate_threshold,
         },
     )
 

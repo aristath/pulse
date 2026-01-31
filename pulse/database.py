@@ -187,8 +187,9 @@ async def add_articles(feed_id: int, articles: list[dict]) -> int:
 async def get_unprocessed_article_for_model(model: str) -> dict | None:
     """Get an article that hasn't been classified by this model.
 
-    Only considers articles with impact >= 0.5, ordered by highest impact first.
+    Only considers articles above the classify impact threshold, ordered by highest impact first.
     """
+    threshold = float(await get_setting("classify_threshold") or "0.5")
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -197,11 +198,11 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
             LEFT JOIN results r ON a.id = r.article_id AND r.model = ?
             WHERE r.id IS NULL
               AND a.impact IS NOT NULL
-              AND a.impact >= 0.5
+              AND a.impact >= ?
             ORDER BY a.impact DESC
             LIMIT 1
         """,
-            (model,),
+            (model, threshold),
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
@@ -396,10 +397,12 @@ async def get_stats(model_count: int = 1) -> dict:
                 )
             ).fetchone()
         )[0]
+        classify_threshold = float(await get_setting("classify_threshold") or "0.5")
         impact_relevant = (
             await (
                 await db.execute(
-                    "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= 0.5"
+                    "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= ?",
+                    (classify_threshold,),
                 )
             ).fetchone()
         )[0]
