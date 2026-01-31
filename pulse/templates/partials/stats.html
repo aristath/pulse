@@ -244,7 +244,7 @@
     document.querySelectorAll('.health-dot[data-started], .worker-dot[data-started]').forEach(function(el) {
         var started = parseFloat(el.dataset.started);
         if (!started) return;
-        var elapsed = (Date.now() / 1000 - started) % 0.6;
+        var elapsed = (Date.now() / 1000 - started) % 0.4;
         el.style.animationDelay = '-' + elapsed.toFixed(3) + 's';
     });
 
