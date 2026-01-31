@@ -60,7 +60,10 @@
 
         <!-- Charts (preserved across HTMX swaps) -->
         <div id="charts-card" class="dash-card" hx-preserve="true">
-            <h3>Sentiment Charts</h3>
+            <h3>Impact Distribution</h3>
+            <div id="chart-impact-dist" style="width:100%;height:250px;"></div>
+
+            <h3 style="margin-top:1.5rem;">Sentiment Charts</h3>
             <!-- Summary row -->
             <div class="charts-grid">
                 <div>
@@ -356,6 +359,53 @@
             allCharts.push(chart);
             return chart;
         }
+
+        // Impact distribution chart
+        var distChart = echarts.init(document.getElementById('chart-impact-dist'));
+        distChart.setOption({
+            backgroundColor: 'transparent',
+            textStyle: { color: '#e0e0e8', fontSize: 11 },
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: '#12121a',
+                borderColor: '#1e1e2e',
+                textStyle: { color: '#e0e0e8', fontSize: 11 },
+                formatter: function(params) {
+                    var p = params[0];
+                    return 'Impact: ' + p.name + '<br>Articles: ' + p.value;
+                }
+            },
+            grid: { top: 10, left: 50, right: 10, bottom: 30 },
+            xAxis: {
+                type: 'category',
+                axisLine: { lineStyle: { color: '#1e1e2e' } },
+                axisLabel: { color: '#8888a0', fontSize: 10 }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { lineStyle: { color: '#1e1e2e' } },
+                axisLabel: { color: '#8888a0', fontSize: 10 },
+                splitLine: { lineStyle: { color: '#1e1e2e' } }
+            },
+            series: []
+        });
+        allCharts.push(distChart);
+
+        function refreshDistChart() {
+            fetch('/api/charts/impact-distribution').then(function(r) { return r.json(); }).then(function(data) {
+                distChart.setOption({
+                    xAxis: { data: data.map(function(d) { return d.bucket.toFixed(2); }) },
+                    series: [{
+                        type: 'bar',
+                        data: data.map(function(d) { return d.count; }),
+                        color: '#6366f1',
+                        barMaxWidth: 20
+                    }]
+                });
+            });
+        }
+        refreshDistChart();
+        setInterval(refreshDistChart, 30000);
 
         // Summary charts
         var cChart = echarts.init(document.getElementById('chart-country'));

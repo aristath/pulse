@@ -179,6 +179,11 @@ async def api_article_company_results(article_id: int):
     return await db.get_company_results_for_article(article_id)
 
 
+@app.get("/api/charts/impact-distribution")
+async def api_charts_impact_distribution():
+    return await db.get_impact_distribution()
+
+
 @app.get("/api/charts/timeseries")
 async def api_charts_timeseries(group_by: str = "country"):
     if group_by not in ("country", "industry"):

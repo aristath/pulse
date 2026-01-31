@@ -464,6 +464,22 @@ async def get_stats(model_count: int = 1) -> dict:
 # --- Charts ---
 
 
+async def get_impact_distribution() -> list[dict]:
+    """Return article counts bucketed by impact score (0.05-wide bins)."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("""
+            SELECT ROUND(impact * 20) / 20.0 AS bucket, COUNT(*) AS count
+            FROM articles
+            WHERE impact IS NOT NULL
+            GROUP BY bucket
+            ORDER BY bucket
+        """)
+        return [{"bucket": row[0], "count": row[1]} for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
 async def get_sentiment_timeseries(group_by: str) -> list[dict]:
     """Get sentiment averaged over time, grouped by country or industry.
 
