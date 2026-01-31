@@ -488,7 +488,7 @@ class EnsembleClassifier:
         """Validate a company scanner candidate using NLI.
 
         Tests "This article is about {company}." against article content.
-        Accepts if entailment >= 0.5, deletes the row otherwise.
+        Accepts if entailment >= validate_threshold setting, deletes the row otherwise.
         Returns True if a row was processed, False if none available.
         """
         if not self._loaded:
