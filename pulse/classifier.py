@@ -108,7 +108,7 @@ def _thermal_delay() -> float:
     if temp is None or temp < 75:
         thermal_throttle["delay"] = 0.0
         return 0.0
-    delay = (temp - 74) * 5.0
+    delay = (temp - 74) * 3.0
     thermal_throttle["delay"] = delay
     return delay
 
@@ -351,14 +351,6 @@ class EnsembleClassifier:
             await save_impact(article["id"], 0.0)
 
         self._clear_model_status(self._impact_scorer.name)
-        delay = _thermal_delay()
-        if delay > 0:
-            logger.info(
-                "[impact] Thermal throttle: %.0fs pause (CPU %.0f°C)",
-                delay,
-                thermal_throttle["temp"],
-            )
-            await asyncio.sleep(delay)
         return True
 
     async def fetch_aliases(self) -> bool:
