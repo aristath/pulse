@@ -1,28 +1,33 @@
 import logging
 
+import spacy
 from gliner import GLiNER
+from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 
-MODEL_ID = "knowledgator/gliner-bi-edge-v2.0"
+GLINER_MODEL_ID = "knowledgator/gliner-bi-edge-v2.0"
+SPACY_MODEL = "en_core_web_lg"
+FUZZY_THRESHOLD = 80
 
 
 class CompanyScanner:
-    """Bi-encoder entity scanner for detecting company mentions in text.
+    """Two-stage company scanner: spaCy NER extracts ORG entities,
+    RapidFuzz matches them against the alias list.
 
-    Uses pre-computed label embeddings for fast inference against
-    a large set of company name aliases.
+    GLiNER model is kept loaded for potential future use but is not
+    used for scanning.
     """
 
     def __init__(self):
         self._model: GLiNER | None = None
+        self._nlp = None  # spaCy model
         self._alias_to_ticker: dict[str, str] = {}
         self._all_aliases: list[str] = []
-        self._label_embeddings = None
 
     @property
     def ready(self) -> bool:
-        return self._model is not None and self._label_embeddings is not None
+        return self._nlp is not None and len(self._all_aliases) > 0
 
     @property
     def all_aliases(self) -> list[str]:
@@ -33,12 +38,16 @@ class CompanyScanner:
         return self._alias_to_ticker
 
     def load(self):
-        logger.info("Loading %s...", MODEL_ID)
-        self._model = GLiNER.from_pretrained(MODEL_ID)
-        logger.info("CompanyScanner loaded")
+        logger.info("Loading %s...", GLINER_MODEL_ID)
+        self._model = GLiNER.from_pretrained(GLINER_MODEL_ID)
+        logger.info("GLiNER loaded (kept for future use)")
+
+        logger.info("Loading spaCy %s...", SPACY_MODEL)
+        self._nlp = spacy.load(SPACY_MODEL)
+        logger.info("spaCy loaded")
 
     def update_aliases(self, ticker_aliases: dict[str, list[str]]):
-        """Rebuild alias-to-ticker map and pre-compute label embeddings.
+        """Rebuild alias-to-ticker map.
 
         Args:
             ticker_aliases: {ticker: [alias1, alias2, ...]}
@@ -57,25 +66,31 @@ class CompanyScanner:
                     self._all_aliases.append(alias)
 
         if not self._all_aliases:
-            self._label_embeddings = None
-            logger.warning("No aliases to encode")
+            logger.warning("No aliases provided")
             return
 
-        logger.info("Encoding %d aliases...", len(self._all_aliases))
-        self._label_embeddings = self._model.encode_labels(self._all_aliases, batch_size=8)
-        logger.info("Alias embeddings ready (%d labels)", len(self._all_aliases))
+        logger.info("Alias map ready (%d aliases)", len(self._all_aliases))
 
     def scan(self, text: str) -> list[str]:
         """Scan text for company mentions. Returns list of matched alias strings."""
         if not self.ready:
             return []
 
-        entities = self._model.batch_predict_with_embeds(
-            [text], self._label_embeddings, self._all_aliases,
-        )
+        doc = self._nlp(text)
+        org_spans = {ent.text for ent in doc.ents if ent.label_ == "ORG"}
+
+        if not org_spans:
+            return []
 
         matched = set()
-        for entity in entities[0]:
-            matched.add(entity["label"])
+        for span in org_spans:
+            result = process.extractOne(
+                span,
+                self._all_aliases,
+                scorer=fuzz.token_set_ratio,
+                score_cutoff=FUZZY_THRESHOLD,
+            )
+            if result is not None:
+                matched.add(result[0])
 
         return list(matched)

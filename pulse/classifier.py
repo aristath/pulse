@@ -342,7 +342,7 @@ class EnsembleClassifier:
 
         Returns True if an article was scanned, False if none available.
         """
-        if self._company_scanner._model is None:
+        if self._company_scanner._nlp is None:
             return False
 
         if not self._company_scanner.ready:
