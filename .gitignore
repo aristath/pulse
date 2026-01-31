@@ -5,6 +5,7 @@ dist/
 build/
 .DS_Store
 *.db
+data/
 .env
 .venv/
 venv/
