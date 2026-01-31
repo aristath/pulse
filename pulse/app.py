@@ -14,7 +14,7 @@ from pydantic import BaseModel as PydanticModel
 from sse_starlette.sse import EventSourceResponse
 
 from pulse import database as db
-from pulse.classifier import ensemble, processing_status, get_worker_avg_times, start_workers, stop_workers
+from pulse.classifier import ensemble, processing_status, get_worker_avg_times, start_workers, stop_workers, WORKER_LABELS
 from pulse.fetcher import fetch_all_feeds
 from pulse.fundus_crawler import (
     get_available_publishers,
@@ -93,6 +93,7 @@ async def dashboard(request: Request):
             "stats": stats,
             "processing": processing_status,
             "avg_times": avg_times,
+            "worker_labels": WORKER_LABELS,
             "feeds": feeds,
             "sentinel_url": sentinel_url,
             "prompt_impact": prompt_impact,
@@ -367,6 +368,7 @@ async def partial_stats(request: Request):
             "stats": stats,
             "processing": processing_status,
             "avg_times": avg_times,
+            "worker_labels": WORKER_LABELS,
             "feeds": feeds,
             "sentinel_url": sentinel_url,
             "prompt_impact": prompt_impact,

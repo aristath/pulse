@@ -82,6 +82,19 @@ WORKER_CONFIGS = [
     ("company-scanner", [("scan", None)]),
 ]
 
+# Display labels for each processing_status key
+WORKER_LABELS = {
+    "impact": "Impact (ModernBERT)",
+    "classify:modernbert-nli": "Classify (ModernBERT)",
+    "validate:modernbert-nli": "Validate (ModernBERT)",
+    "company_sentiment:modernbert-nli": "Sentiment (ModernBERT)",
+    "classify:deberta-nli": "Classify (DeBERTa)",
+    "validate:deberta-nli": "Validate (DeBERTa)",
+    "company_sentiment:deberta-nli": "Sentiment (DeBERTa)",
+    "classify:finbert": "Classify (FinBERT)",
+    "company-scanner": "Company Scanner (GLiNER)",
+}
+
 
 def _thermal_delay() -> float:
     """Compute inference pause based on CPU package temperature.
@@ -147,41 +160,21 @@ class EnsembleClassifier:
             self._models.remove(m)
         if self._models:
             self._loaded = True
-            for model in self._models:
-                processing_status[model.name] = {
-                    "article_id": None,
-                    "article_url": None,
-                    "started_at": None,
-                }
             # Share ModernBERT weights with impact scorer
             modernbert = self._get_model("modernbert-nli")
             if modernbert:
                 self._impact_scorer.set_model(modernbert._tokenizer, modernbert._model)
-                processing_status[self._impact_scorer.name] = {
-                    "article_id": None,
-                    "article_url": None,
-                    "started_at": None,
-                }
             # Load company scanner
             try:
                 self._company_scanner.load()
-                processing_status["company-scanner"] = {
-                    "article_id": None,
-                    "article_url": None,
-                    "started_at": None,
-                }
-                processing_status["company-validate"] = {
-                    "article_id": None,
-                    "article_url": None,
-                    "started_at": None,
-                }
-                processing_status["company-sentiment"] = {
-                    "article_id": None,
-                    "article_url": None,
-                    "started_at": None,
-                }
             except Exception:
                 logger.exception("Failed to load CompanyScanner")
+            # Initialize processing_status from WORKER_CONFIGS
+            _idle = {"article_id": None, "article_url": None, "started_at": None}
+            for worker_name, capabilities in WORKER_CONFIGS:
+                for task_type, model in capabilities:
+                    key = f"{task_type}:{model}" if model else worker_name
+                    processing_status[key] = dict(_idle)
             logger.info("Loaded %d models (%d failed)", len(self._models), len(failed))
         else:
             logger.error("No models loaded successfully")
@@ -242,7 +235,8 @@ class EnsembleClassifier:
         prompt_country = await get_setting("prompt_country") or ""
         prompt_sentiment = await get_setting("prompt_sentiment") or ""
 
-        processing_status[model_name] = {
+        status_key = f"classify:{model_name}"
+        processing_status[status_key] = {
             "article_id": article["id"],
             "article_url": article["url"],
             "started_at": time.time(),
@@ -265,7 +259,7 @@ class EnsembleClassifier:
                 "[%s] Could not fetch content for article %d", model_name, article["id"]
             )
             await save_result(article["id"], model_name, {})
-            self._clear_model_status(model_name)
+            self._clear_model_status(status_key)
             return True
 
         loop = asyncio.get_event_loop()
@@ -286,7 +280,7 @@ class EnsembleClassifier:
             logger.error("[%s] Failed on article %d: %s", model_name, article["id"], e)
             await save_result(article["id"], model_name, {})
 
-        self._clear_model_status(model_name)
+        self._clear_model_status(status_key)
         delay = _thermal_delay()
         if delay > 0:
             logger.info(
@@ -517,7 +511,8 @@ class EnsembleClassifier:
             company_name = name_candidate
             break
 
-        processing_status["company-validate"] = {
+        status_key = f"validate:{model_name}" if model_name else "validate:modernbert-nli"
+        processing_status[status_key] = {
             "article_id": article_id,
             "article_url": article_url,
             "started_at": time.time(),
@@ -537,7 +532,7 @@ class EnsembleClassifier:
                 article_id,
             )
             await delete_company_result(article_id, ticker)
-            self._clear_model_status("company-validate")
+            self._clear_model_status(status_key)
             return True
 
         model = None
@@ -546,7 +541,7 @@ class EnsembleClassifier:
         if not model:
             model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
         if not model:
-            self._clear_model_status("company-validate")
+            self._clear_model_status(status_key)
             return False
 
         hypothesis = f"This article is about {company_name}."
@@ -582,7 +577,7 @@ class EnsembleClassifier:
             )
             await delete_company_result(article_id, ticker)
 
-        self._clear_model_status("company-validate")
+        self._clear_model_status(status_key)
         delay = _thermal_delay()
         if delay > 0:
             await asyncio.sleep(delay)
@@ -620,7 +615,8 @@ class EnsembleClassifier:
 
             prompt_company = await get_setting("prompt_company") or ""
 
-            processing_status["company-sentiment"] = {
+            status_key = f"company_sentiment:{model_name}" if model_name else "company_sentiment:modernbert-nli"
+            processing_status[status_key] = {
                 "article_id": article_id,
                 "article_url": article_url,
                 "started_at": time.time(),
@@ -642,7 +638,7 @@ class EnsembleClassifier:
                     article_id,
                 )
                 await save_company_sentiment(article_id, ticker, 0.0, 0.0)
-                self._clear_model_status("company-sentiment")
+                self._clear_model_status(status_key)
                 return True
 
             # Use specified model, or fall back to any available NLI model
@@ -654,7 +650,7 @@ class EnsembleClassifier:
                     "deberta-nli"
                 )
             if not model:
-                self._clear_model_status("company-sentiment")
+                self._clear_model_status(status_key)
                 return False
 
             tpl = prompt_company or "This is good news for {company}."
@@ -688,7 +684,7 @@ class EnsembleClassifier:
                 )
                 await save_company_sentiment(article_id, ticker, 0.0, 0.0)
 
-            self._clear_model_status("company-sentiment")
+            self._clear_model_status(status_key)
             delay = _thermal_delay()
             if delay > 0:
                 await asyncio.sleep(delay)

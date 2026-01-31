@@ -2,9 +2,9 @@
 <div class="health-bar">
     <div class="health-dots">
         {% for name, status in processing.items() %}
-        <div class="health-dot {{ 'active' if status.article_id else '' }}" title="{{ name }}">
+        <div class="health-dot {{ 'active' if status.article_id else '' }}" title="{{ worker_labels.get(name, name) }}">
             <div class="tooltip">
-                <strong>{{ name }}</strong>
+                <strong>{{ worker_labels.get(name, name) }}</strong>
                 {% if avg_times.get(name) is not none %}<br>avg {{ avg_times[name] }}s{% endif %}
             </div>
         </div>
@@ -167,7 +167,7 @@
             {% for name, status in processing.items() %}
             <div class="worker-row">
                 <div class="worker-dot {{ 'active' if status.article_id else '' }}"></div>
-                <span class="worker-name">{{ name }}</span>
+                <span class="worker-name">{{ worker_labels.get(name, name) }}</span>
                 <span class="worker-activity">
                     {% if status.article_id %}
                         #{{ status.article_id }}
