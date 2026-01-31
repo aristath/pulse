@@ -1,5 +1,29 @@
 from abc import ABC, abstractmethod
 
+import torch
+
+
+def get_torch_device() -> torch.device:
+    """Return the best available torch device: MPS (Apple), CUDA, or CPU."""
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def is_latin_text(text: str, threshold: float = 0.5) -> bool:
+    """Check if text is predominantly Latin script.
+
+    Returns False for Arabic, CJK, Cyrillic, etc. which cause
+    extremely slow tokenization on English-trained models.
+    """
+    if not text:
+        return False
+    sample = text[:500]
+    latin = sum(1 for c in sample if c.isascii() or '\u00C0' <= c <= '\u024F')
+    return latin / len(sample) >= threshold
+
 
 class BaseModel(ABC):
     """Base interface for all classification models."""

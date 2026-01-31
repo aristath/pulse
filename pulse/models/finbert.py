@@ -2,7 +2,7 @@ import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from pulse.models.base import BaseModel
+from pulse.models.base import BaseModel, get_torch_device, is_latin_text
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,13 @@ class FinBERT(BaseModel):
 
     def load(self):
         model_id = "ProsusAI/finbert"
-        logger.info("Loading %s...", model_id)
+        self._device = get_torch_device()
+        logger.info("Loading %s on %s...", model_id, self._device)
         self._tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._model = AutoModelForSequenceClassification.from_pretrained(model_id)
+        self._model.to(self._device)
         self._model.eval()
-        logger.info("%s loaded", self.name)
+        logger.info("%s loaded on %s", self.name, self._device)
 
     def classify(
         self,
@@ -40,6 +42,9 @@ class FinBERT(BaseModel):
         prompt_country: str = "",
         prompt_sentiment: str = "",
     ) -> dict:
+        if not is_latin_text(text):
+            return {}
+
         text_lower = text.lower()
 
         # Pass 1: Which countries are mentioned?
@@ -90,7 +95,7 @@ class FinBERT(BaseModel):
         """Return sentiment score: positive (0 to 1), negative (-1 to 0)."""
         inputs = self._tokenizer(
             text, return_tensors="pt", truncation=True, max_length=512
-        )
+        ).to(self._device)
         with torch.no_grad():
             logits = self._model(**inputs).logits
         probs = torch.softmax(logits, dim=-1)

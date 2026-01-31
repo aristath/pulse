@@ -2,7 +2,7 @@ import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from pulse.models.base import BaseModel
+from pulse.models.base import BaseModel, get_torch_device, is_latin_text
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +22,13 @@ class DeBERTaNLI(BaseModel):
 
     def load(self):
         model_id = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
-        logger.info("Loading %s...", model_id)
+        self._device = get_torch_device()
+        logger.info("Loading %s on %s...", model_id, self._device)
         self._tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._model = AutoModelForSequenceClassification.from_pretrained(model_id)
+        self._model.to(self._device)
         self._model.eval()
-        logger.info("%s loaded", self.name)
+        logger.info("%s loaded on %s", self.name, self._device)
 
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
@@ -39,6 +41,9 @@ class DeBERTaNLI(BaseModel):
         prompt_country: str = "",
         prompt_sentiment: str = "",
     ) -> dict:
+        if not is_latin_text(text):
+            return {}
+
         chunks = self._chunk_text(text)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
@@ -103,7 +108,7 @@ class DeBERTaNLI(BaseModel):
             truncation=True,
             padding=True,
             max_length=512,
-        )
+        ).to(self._device)
         with torch.no_grad():
             logits = self._model(**inputs).logits
         probs = torch.softmax(logits, dim=-1)
@@ -121,7 +126,7 @@ class DeBERTaNLI(BaseModel):
             truncation=True,
             padding=True,
             max_length=512,
-        )
+        ).to(self._device)
         with torch.no_grad():
             logits = self._model(**inputs).logits
         probs = torch.softmax(logits, dim=-1)

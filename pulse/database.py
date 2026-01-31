@@ -199,6 +199,7 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
             WHERE r.id IS NULL
               AND a.impact IS NOT NULL
               AND a.impact >= ?
+              AND a.content IS NOT NULL AND a.content != ''
             ORDER BY a.impact DESC
             LIMIT 1
         """,
@@ -211,20 +212,14 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
 
 
 async def get_next_article_for_impact() -> dict | None:
-    """Get an article that hasn't been impact-scored yet.
-
-    Prioritizes articles that already have classification results.
-    """
+    """Get an article that hasn't been impact-scored yet, newest first."""
     db = await get_db()
     try:
         cursor = await db.execute("""
             SELECT a.* FROM articles a
             WHERE a.impact IS NULL
-            ORDER BY
-                CASE WHEN EXISTS (
-                    SELECT 1 FROM results r WHERE r.article_id = a.id
-                ) THEN 0 ELSE 1 END,
-                a.fetched_at DESC
+              AND a.content IS NOT NULL AND a.content != ''
+            ORDER BY a.published_at DESC, a.id DESC
             LIMIT 1
         """)
         row = await cursor.fetchone()
@@ -615,6 +610,7 @@ async def get_article_missing_alias(alias: str) -> dict | None:
             """
             SELECT a.* FROM articles a
             WHERE a.impact IS NOT NULL AND a.impact >= ?
+              AND a.content IS NOT NULL AND a.content != ''
               AND (a.scanned_aliases IS NULL
                    OR ? NOT IN (SELECT value FROM json_each(a.scanned_aliases)))
             ORDER BY a.impact DESC
@@ -815,6 +811,48 @@ async def add_fundus_articles(articles: list[dict]) -> int:
                 pass
         await db.commit()
         return added
+    finally:
+        await db.close()
+
+
+async def get_articles_needing_content(limit: int = 10) -> list[dict]:
+    """Return articles that need processing but have no content yet.
+
+    Prioritizes impact-unscored articles (biggest backlog), then unclassified,
+    then unscanned.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT a.id, a.url FROM articles a
+            WHERE a.content IS NULL
+              AND (a.impact IS NULL
+                   OR NOT EXISTS (
+                       SELECT 1 FROM results r WHERE r.article_id = a.id
+                   ))
+            ORDER BY
+                CASE WHEN a.impact IS NULL THEN 0 ELSE 1 END,
+                a.fetched_at DESC
+            LIMIT ?
+        """,
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def store_article_content(article_id: int, content: str, published_at: str | None):
+    """Store fetched content for an article."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE articles SET content = ?, published_at = COALESCE(published_at, ?) WHERE id = ?",
+            (content, published_at, article_id),
+        )
+        await db.commit()
     finally:
         await db.close()
 

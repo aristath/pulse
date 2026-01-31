@@ -30,6 +30,8 @@ from pulse.database import (
     get_next_unvalidated_company_result,
     mark_company_result_validated,
     delete_company_result,
+    get_articles_needing_content,
+    store_article_content,
 )
 from pulse.fetcher import fetch_article_content
 
@@ -246,36 +248,32 @@ class EnsembleClassifier:
             "[%s] Classifying article %d: %s", model_name, article["id"], article["url"]
         )
 
-        if article.get("content"):
-            content = article["content"]
-            published_at = article.get("published_at")
-        else:
-            content, published_at = await fetch_article_content(article["url"])
-        if published_at and not article.get("published_at"):
-            await update_article_date(article["id"], published_at)
-
+        content = article["content"]
         if not content:
-            logger.warning(
-                "[%s] Could not fetch content for article %d", model_name, article["id"]
-            )
             await save_result(article["id"], model_name, {})
             self._clear_model_status(status_key)
             return True
 
         loop = asyncio.get_event_loop()
         try:
-            result = await loop.run_in_executor(
-                self._executor,
-                model.classify,
-                content,
-                self._countries,
-                self._sectors,
-                prompt_country,
-                prompt_sentiment,
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self._executor,
+                    model.classify,
+                    content,
+                    self._countries,
+                    self._sectors,
+                    prompt_country,
+                    prompt_sentiment,
+                ),
+                timeout=60,
             )
             await save_result(article["id"], model_name, result)
             if result:
                 logger.info("[%s] Article %d: %s", model_name, article["id"], result)
+        except asyncio.TimeoutError:
+            logger.warning("[%s] Timeout on article %d — skipping", model_name, article["id"])
+            await save_result(article["id"], model_name, {})
         except Exception as e:
             logger.error("[%s] Failed on article %d: %s", model_name, article["id"], e)
             await save_result(article["id"], model_name, {})
@@ -303,7 +301,6 @@ class EnsembleClassifier:
         article = await get_next_article_for_impact()
         if not article:
             return False
-
         prompt_impact = await get_setting("prompt_impact") or ""
 
         processing_status[self._impact_scorer.name] = {
@@ -314,32 +311,28 @@ class EnsembleClassifier:
 
         logger.info("[impact] Scoring article %d: %s", article["id"], article["url"])
 
-        if article.get("content"):
-            content = article["content"]
-            published_at = article.get("published_at")
-        else:
-            content, published_at = await fetch_article_content(article["url"])
-        if published_at and not article.get("published_at"):
-            await update_article_date(article["id"], published_at)
-
+        content = article["content"]
         if not content:
-            logger.warning(
-                "[impact] Could not fetch content for article %d", article["id"]
-            )
             await save_impact(article["id"], 0.0)
             self._clear_model_status(self._impact_scorer.name)
             return True
 
         loop = asyncio.get_event_loop()
         try:
-            score = await loop.run_in_executor(
-                self._executor,
-                self._impact_scorer.score,
-                content,
-                prompt_impact,
+            score = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self._executor,
+                    self._impact_scorer.score,
+                    content,
+                    prompt_impact,
+                ),
+                timeout=60,
             )
             await save_impact(article["id"], score)
             logger.info("[impact] Article %d: %.4f", article["id"], score)
+        except asyncio.TimeoutError:
+            logger.warning("[impact] Timeout on article %d — skipping", article["id"])
+            await save_impact(article["id"], 0.0)
         except Exception as e:
             logger.error("[impact] Failed on article %d: %s", article["id"], e)
             await save_impact(article["id"], 0.0)
@@ -439,23 +432,23 @@ class EnsembleClassifier:
             article["url"],
         )
 
-        if article.get("content"):
-            content = article["content"]
-            published_at = article.get("published_at")
-        else:
-            content, published_at = await fetch_article_content(article["url"])
-        if published_at and not article.get("published_at"):
-            await update_article_date(article["id"], published_at)
-
+        content = article.get("content")
         matched_aliases: list[str] = []
         if content and missing:
             loop = asyncio.get_event_loop()
             try:
-                matched_aliases = await loop.run_in_executor(
-                    self._executor,
-                    self._company_scanner.scan,
-                    content,
-                    missing,
+                matched_aliases = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor,
+                        self._company_scanner.scan,
+                        content,
+                        missing,
+                    ),
+                    timeout=60,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[company-scanner] Timeout on article %d — skipping", article["id"]
                 )
             except Exception as e:
                 logger.error(
@@ -688,6 +681,36 @@ class EnsembleClassifier:
                 await asyncio.sleep(delay)
             return True
 
+    async def _prefetch_content_loop(self):
+        """Pre-fetch article content into DB so workers never wait for HTTP."""
+        logger.info("[prefetcher] Started")
+        try:
+            while _workers_running:
+                articles = await get_articles_needing_content(limit=5)
+                if not articles:
+                    await asyncio.sleep(5)
+                    continue
+                tasks = [self._fetch_and_store(a) for a in articles]
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            pass
+        logger.info("[prefetcher] Stopped")
+
+    async def _fetch_and_store(self, article):
+        """Fetch content for a single article and store it in the DB."""
+        try:
+            content, published_at = await fetch_article_content(article["url"])
+            if content:
+                await store_article_content(article["id"], content, published_at)
+            else:
+                # Store empty string to prevent retry, save impact=0
+                await store_article_content(article["id"], "", None)
+                await save_impact(article["id"], 0.0)
+        except Exception as e:
+            logger.error("[prefetcher] Failed for article %d: %s", article["id"], e)
+            await store_article_content(article["id"], "", None)
+            await save_impact(article["id"], 0.0)
+
     def _get_model(self, name: str) -> BaseModel | None:
         for m in self._models:
             if m.name == name:
@@ -776,13 +799,19 @@ def start_workers():
     """Launch all pull-based worker loops as async tasks."""
     global _workers_running
     _workers_running = True
+    # Launch content pre-fetcher
+    prefetch_task = asyncio.create_task(
+        ensemble._prefetch_content_loop(),
+        name="prefetcher",
+    )
+    _worker_tasks.append(prefetch_task)
     for worker_name, capabilities in WORKER_CONFIGS:
         task = asyncio.create_task(
             ensemble._worker_loop(worker_name, capabilities),
             name=f"worker:{worker_name}",
         )
         _worker_tasks.append(task)
-    logger.info("Started %d workers", len(_worker_tasks))
+    logger.info("Started %d workers + prefetcher", len(_worker_tasks) - 1)
 
 
 async def stop_workers():

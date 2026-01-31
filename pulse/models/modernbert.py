@@ -2,7 +2,7 @@ import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from pulse.models.base import BaseModel
+from pulse.models.base import BaseModel, get_torch_device, is_latin_text
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,13 @@ class ModernBERTNLI(BaseModel):
 
     def load(self):
         model_id = "MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
-        logger.info("Loading %s...", model_id)
+        self._device = get_torch_device()
+        logger.info("Loading %s on %s...", model_id, self._device)
         self._tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._model = AutoModelForSequenceClassification.from_pretrained(model_id)
+        self._model.to(self._device)
         self._model.eval()
-        logger.info("%s loaded", self.name)
+        logger.info("%s loaded on %s", self.name, self._device)
 
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
@@ -38,6 +40,9 @@ class ModernBERTNLI(BaseModel):
         prompt_country: str = "",
         prompt_sentiment: str = "",
     ) -> dict:
+        if not is_latin_text(text):
+            return {}
+
         text = self.truncate(text, 6000)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
@@ -76,35 +81,38 @@ class ModernBERTNLI(BaseModel):
         return signals
 
     def _nli_batch(self, premise: str, hypotheses: list[str]) -> list[float]:
-        """Batch NLI — return entailment scores for all hypotheses."""
-        inputs = self._tokenizer(
-            [premise] * len(hypotheses),
-            hypotheses,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=8192,
-        )
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
-        probs = torch.softmax(logits, dim=-1)
-        # v2.0: 2-class (0=entailment, 1=not_entailment)
-        return probs[:, 0].tolist()
+        """NLI — return entailment scores, one hypothesis at a time."""
+        scores = []
+        for hyp in hypotheses:
+            inputs = self._tokenizer(
+                premise,
+                hyp,
+                return_tensors="pt",
+                truncation=True,
+                max_length=4096,
+            ).to(self._device)
+            with torch.no_grad():
+                logits = self._model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)
+            scores.append(probs[0, 0].item())
+        return scores
 
     def _nli_batch_full(
         self, premise: str, hypotheses: list[str]
     ) -> tuple[list[float], list[float]]:
-        """Batch NLI — return (entailment_scores, contradiction_scores)."""
-        inputs = self._tokenizer(
-            [premise] * len(hypotheses),
-            hypotheses,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=8192,
-        )
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
-        probs = torch.softmax(logits, dim=-1)
-        # v2.0: 2-class (0=entailment, 1=not_entailment)
-        return probs[:, 0].tolist(), probs[:, 1].tolist()
+        """NLI — return (entailment_scores, contradiction_scores), one hypothesis at a time."""
+        entail, contra = [], []
+        for hyp in hypotheses:
+            inputs = self._tokenizer(
+                premise,
+                hyp,
+                return_tensors="pt",
+                truncation=True,
+                max_length=4096,
+            ).to(self._device)
+            with torch.no_grad():
+                logits = self._model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)
+            entail.append(probs[0, 0].item())
+            contra.append(probs[0, 1].item())
+        return entail, contra
