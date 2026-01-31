@@ -79,7 +79,6 @@ app = FastAPI(title="Pulse", docs_url="/docs", lifespan=lifespan)
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
-    recent_articles = await db.get_articles(limit=10)
     avg_times = get_worker_avg_times()
     return templates.TemplateResponse(
         "dashboard.html",
@@ -87,7 +86,6 @@ async def dashboard(request: Request):
             "request": request,
             "stats": stats,
             "processing": processing_status,
-            "recent_articles": recent_articles,
             "avg_times": avg_times,
         },
     )
@@ -402,7 +400,6 @@ async def sse_events(request: Request):
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
-    recent_articles = await db.get_articles(limit=10)
     avg_times = get_worker_avg_times()
     return templates.TemplateResponse(
         "partials/stats.html",
@@ -410,7 +407,6 @@ async def partial_stats(request: Request):
             "request": request,
             "stats": stats,
             "processing": processing_status,
-            "recent_articles": recent_articles,
             "avg_times": avg_times,
         },
     )

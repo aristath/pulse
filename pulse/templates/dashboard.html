@@ -115,33 +115,6 @@
     padding: 0 0.4rem;
 }
 
-/* Recent articles table */
-.recent-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-.recent-table th {
-    text-align: left;
-    color: var(--text-dim);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid var(--border);
-}
-.recent-table td {
-    padding: 0.35rem 0.5rem;
-    font-size: 0.8rem;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 0;
-}
-.recent-table td:first-child { max-width: 100%; width: 100%; }
-.recent-table td:not(:first-child) { white-space: nowrap; max-width: none; width: auto; }
-.recent-table tr:hover { background: rgba(99, 102, 241, 0.05); }
-
 /* Workers panel */
 .worker-row {
     display: flex;
@@ -195,10 +168,6 @@
 .kv-row:last-child { border-bottom: none; }
 .kv-label { color: var(--text-dim); }
 .kv-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-
-/* Impact badges */
-.impact-hi { color: var(--green); font-weight: 600; }
-.impact-lo { color: var(--text-dim); }
 
 /* Model results */
 .model-row {
