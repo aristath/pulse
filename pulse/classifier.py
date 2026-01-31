@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -36,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 # Per-model processing status for web UI: {model_name: {article_id, article_url, started_at}}
 processing_status = {}
+
+# Last 10 inference durations per worker (seconds)
+worker_durations: dict[str, deque] = {}
 
 # Current thermal throttle delay (seconds) — exposed for the UI
 thermal_throttle: dict = {"delay": 0.0, "temp": None}
@@ -705,6 +709,13 @@ class EnsembleClassifier:
         return None
 
     def _clear_model_status(self, model_name: str):
+        status = processing_status.get(model_name, {})
+        started = status.get("started_at")
+        if started:
+            duration = time.time() - started
+            if model_name not in worker_durations:
+                worker_durations[model_name] = deque(maxlen=10)
+            worker_durations[model_name].append(duration)
         processing_status[model_name] = {
             "article_id": None,
             "article_url": None,
@@ -761,6 +772,18 @@ class EnsembleClassifier:
 
 # Singleton
 ensemble = EnsembleClassifier()
+
+
+def get_worker_avg_times() -> dict[str, float | None]:
+    """Return average inference time (seconds) per worker, or None if no data."""
+    result = {}
+    for name in processing_status:
+        durations = worker_durations.get(name)
+        if durations:
+            result[name] = round(sum(durations) / len(durations), 1)
+        else:
+            result[name] = None
+    return result
 
 
 def start_workers():

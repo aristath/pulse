@@ -14,7 +14,7 @@ from pydantic import BaseModel as PydanticModel
 from sse_starlette.sse import EventSourceResponse
 
 from pulse import database as db
-from pulse.classifier import ensemble, processing_status, start_workers, stop_workers
+from pulse.classifier import ensemble, processing_status, get_worker_avg_times, start_workers, stop_workers
 from pulse.fetcher import fetch_all_feeds
 from pulse.fundus_crawler import (
     get_available_publishers,
@@ -79,12 +79,16 @@ app = FastAPI(title="Pulse", docs_url="/docs", lifespan=lifespan)
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
+    recent_articles = await db.get_articles(limit=10)
+    avg_times = get_worker_avg_times()
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "stats": stats,
             "processing": processing_status,
+            "recent_articles": recent_articles,
+            "avg_times": avg_times,
         },
     )
 
@@ -241,7 +245,7 @@ async def api_stats():
 
 @app.get("/api/stats/processing")
 async def api_processing():
-    return processing_status
+    return {"processing": processing_status, "avg_times": get_worker_avg_times()}
 
 
 _cached_stats: dict = {"cpu_percent": 0.0, "ram_percent": 0.0, "temperature": None}
@@ -384,6 +388,7 @@ async def sse_events(request: Request):
             data = {
                 "stats": stats,
                 "processing": processing_status,
+                "avg_times": get_worker_avg_times(),
             }
             yield {"event": "update", "data": json.dumps(data)}
             await asyncio.sleep(3)
@@ -397,12 +402,16 @@ async def sse_events(request: Request):
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
+    recent_articles = await db.get_articles(limit=10)
+    avg_times = get_worker_avg_times()
     return templates.TemplateResponse(
         "partials/stats.html",
         {
             "request": request,
             "stats": stats,
             "processing": processing_status,
+            "recent_articles": recent_articles,
+            "avg_times": avg_times,
         },
     )
 
