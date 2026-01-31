@@ -2,7 +2,7 @@
 <div class="health-bar">
     <div class="health-dots">
         {% for name, status in processing.items() %}
-        <div class="health-dot {{ 'active' if status.article_id else '' }}" title="{{ worker_labels.get(name, name) }}">
+        <div class="health-dot {{ 'active' if status.article_id else '' }}" title="{{ worker_labels.get(name, name) }}"{% if status.started_at %} data-started="{{ status.started_at }}"{% endif %}>
             <div class="tooltip">
                 <strong>{{ worker_labels.get(name, name) }}</strong>
                 {% if avg_times.get(name) is not none %}<br>avg {{ avg_times[name] }}s{% endif %}
@@ -166,7 +166,7 @@
             <h3>Workers</h3>
             {% for name, status in processing.items() %}
             <div class="worker-row">
-                <div class="worker-dot {{ 'active' if status.article_id else '' }}"></div>
+                <div class="worker-dot {{ 'active' if status.article_id else '' }}"{% if status.started_at %} data-started="{{ status.started_at }}"{% endif %}></div>
                 <span class="worker-name">{{ worker_labels.get(name, name) }}</span>
                 <span class="worker-activity">
                     {% if status.article_id %}
@@ -183,13 +183,13 @@
             {% endfor %}
         </div>
 
-        <!-- Model Results -->
-        {% if stats.per_model %}
+        <!-- Worker Results -->
+        {% if stats.per_worker %}
         <div class="dash-card">
-            <h3>Model Results</h3>
-            {% for model, count in stats.per_model.items() %}
+            <h3>Worker Results</h3>
+            {% for key, count in stats.per_worker.items() %}
             <div class="model-row">
-                <span class="kv-label">{{ model }}</span>
+                <span class="kv-label">{{ worker_labels.get(key, key) }}</span>
                 <span class="kv-value">{{ count }}</span>
             </div>
             {% endfor %}
@@ -239,6 +239,14 @@
     }
     updateTimers();
     setInterval(updateTimers, 1000);
+
+    // Offset blink animation so each dot starts from its job start time
+    document.querySelectorAll('.health-dot[data-started], .worker-dot[data-started]').forEach(function(el) {
+        var started = parseFloat(el.dataset.started);
+        if (!started) return;
+        var elapsed = (Date.now() / 1000 - started) % 0.6;
+        el.style.animationDelay = '-' + elapsed.toFixed(3) + 's';
+    });
 
     // Init echarts (only once)
     if (typeof echarts !== 'undefined' && !window._chartsInited) {

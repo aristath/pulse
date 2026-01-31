@@ -382,10 +382,11 @@ async def get_stats(model_count: int = 1) -> dict:
         )[0]
         feeds = (await (await db.execute("SELECT COUNT(*) FROM feeds")).fetchone())[0]
 
+        # Per-model classify counts
         cursor = await db.execute(
             "SELECT model, COUNT(*) as cnt FROM results GROUP BY model"
         )
-        per_model = {row[0]: row[1] for row in await cursor.fetchall()}
+        classify_counts = {row[0]: row[1] for row in await cursor.fetchall()}
 
         # Impact stats
         impact_scored = (
@@ -414,6 +415,13 @@ async def get_stats(model_count: int = 1) -> dict:
         company_mentions = (
             await (await db.execute("SELECT COUNT(*) FROM company_results")).fetchone()
         )[0]
+        company_validated = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM company_results WHERE validated = 1"
+                )
+            ).fetchone()
+        )[0]
         company_scored = (
             await (
                 await db.execute(
@@ -422,13 +430,23 @@ async def get_stats(model_count: int = 1) -> dict:
             ).fetchone()
         )[0]
 
+        # Build per-worker task counts keyed by processing_status keys
+        per_worker = {"impact": impact_scored}
+        for model_name, count in classify_counts.items():
+            per_worker[f"classify:{model_name}"] = count
+        per_worker["company-scanner"] = company_scanned
+        # Validate/sentiment are shared across models — show on first available
+        per_worker["validate:modernbert-nli"] = company_validated
+        per_worker["company_sentiment:modernbert-nli"] = company_scored
+
         return {
             "total_articles": total,
             "processed_articles": processed,
             "unprocessed_articles": total - processed,
             "sent_articles": sent,
             "total_feeds": feeds,
-            "per_model": per_model,
+            "per_model": classify_counts,
+            "per_worker": per_worker,
             "impact_scored": impact_scored,
             "impact_relevant": impact_relevant,
             "impact_unscored": total - impact_scored,
