@@ -185,20 +185,26 @@ async def api_charts_impact_distribution():
 
 
 @app.get("/api/charts/timeseries")
-async def api_charts_timeseries(group_by: str = "country"):
+async def api_charts_timeseries(group_by: str = "country", period: str = "3m"):
     if group_by not in ("country", "industry"):
         raise HTTPException(400, "group_by must be 'country' or 'industry'")
-    return await db.get_sentiment_timeseries(group_by)
+    if period not in ("3m", "6m", "1y"):
+        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
+    return await db.get_sentiment_timeseries(group_by, period)
 
 
 @app.get("/api/charts/detailed")
-async def api_charts_detailed():
-    return await db.get_sentiment_detailed()
+async def api_charts_detailed(period: str = "3m"):
+    if period not in ("3m", "6m", "1y"):
+        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
+    return await db.get_sentiment_detailed(period)
 
 
 @app.get("/api/charts/companies")
-async def api_charts_companies():
-    return await db.get_company_sentiment_timeseries()
+async def api_charts_companies(period: str = "3m"):
+    if period not in ("3m", "6m", "1y"):
+        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
+    return await db.get_company_sentiment_timeseries(period)
 
 
 @app.get("/api/stats")

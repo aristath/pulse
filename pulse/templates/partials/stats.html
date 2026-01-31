@@ -63,7 +63,13 @@
             <h3>Impact Distribution</h3>
             <div id="chart-impact-dist" style="width:100%;height:250px;"></div>
 
-            <h3 style="margin-top:1.5rem;">Sentiment Charts</h3>
+            <h3 style="margin-top:1.5rem;">Sentiment Charts
+                <span class="period-switch" style="float:right;font-size:0.75rem;font-weight:400;">
+                    <button class="period-btn active" data-period="3m">3M</button>
+                    <button class="period-btn" data-period="6m">6M</button>
+                    <button class="period-btn" data-period="1y">1Y</button>
+                </span>
+            </h3>
             <!-- Summary row -->
             <div class="charts-grid">
                 <div>
@@ -422,13 +428,25 @@
         var industryCharts = {};
         var countryCharts = {};
         var companyCharts = {};
+        var chartPeriod = '3m';
+
+        // Period switcher
+        document.querySelectorAll('.period-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                chartPeriod = btn.dataset.period;
+                refreshCharts();
+            });
+        });
 
         function refreshCharts() {
+            var p = chartPeriod;
             Promise.all([
-                fetch('/api/charts/timeseries?group_by=country').then(function(r) { return r.json(); }),
-                fetch('/api/charts/timeseries?group_by=industry').then(function(r) { return r.json(); }),
-                fetch('/api/charts/detailed').then(function(r) { return r.json(); }),
-                fetch('/api/charts/companies').then(function(r) { return r.json(); })
+                fetch('/api/charts/timeseries?group_by=country&period=' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/timeseries?group_by=industry&period=' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/detailed?period=' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/companies?period=' + p).then(function(r) { return r.json(); })
             ]).then(function(results) {
                 var cData = results[0], iData = results[1], dData = results[2], coData = results[3];
 

@@ -498,7 +498,27 @@ async def get_impact_distribution() -> list[dict]:
         await db.close()
 
 
-async def get_sentiment_timeseries(group_by: str) -> list[dict]:
+def _date_bucket_expr(col: str, period: str) -> str:
+    """Return a SQL expression that buckets a date column by period."""
+    if period == "6m":
+        return (
+            f"CASE WHEN CAST(strftime('%m', {col}) AS INTEGER) <= 6 "
+            f"THEN strftime('%Y', {col}) || '-01-01' "
+            f"ELSE strftime('%Y', {col}) || '-07-01' END"
+        )
+    if period == "1y":
+        return f"strftime('%Y', {col}) || '-01-01'"
+    # Default: 3m (quarterly)
+    return (
+        f"CASE ((CAST(strftime('%m', {col}) AS INTEGER) - 1) / 3) "
+        f"WHEN 0 THEN strftime('%Y', {col}) || '-01-01' "
+        f"WHEN 1 THEN strftime('%Y', {col}) || '-04-01' "
+        f"WHEN 2 THEN strftime('%Y', {col}) || '-07-01' "
+        f"WHEN 3 THEN strftime('%Y', {col}) || '-10-01' END"
+    )
+
+
+async def get_sentiment_timeseries(group_by: str, period: str = "3m") -> list[dict]:
     """Get sentiment averaged over time, grouped by country or industry.
 
     Args:
@@ -511,13 +531,9 @@ async def get_sentiment_timeseries(group_by: str) -> list[dict]:
     else:
         raise ValueError(f"group_by must be 'country' or 'industry', got {group_by!r}")
 
+    bucket = _date_bucket_expr("a.published_at", period)
     sql = f"""
-        SELECT CASE ((CAST(strftime('%m', a.published_at) AS INTEGER) - 1) / 3)
-                   WHEN 0 THEN strftime('%Y', a.published_at) || '-01-01'
-                   WHEN 1 THEN strftime('%Y', a.published_at) || '-04-01'
-                   WHEN 2 THEN strftime('%Y', a.published_at) || '-07-01'
-                   WHEN 3 THEN strftime('%Y', a.published_at) || '-10-01'
-               END as day,
+        SELECT {bucket} as day,
                {label_expr} as label,
                SUM(CAST(sector.value AS REAL) * COALESCE(a.impact, 0)) / MAX(SUM(a.impact), 1) as avg_sentiment
         FROM results r
@@ -537,15 +553,11 @@ async def get_sentiment_timeseries(group_by: str) -> list[dict]:
         await db.close()
 
 
-async def get_sentiment_detailed() -> list[dict]:
-    """Get sentiment by day, country, and industry (quarterly aggregation)."""
-    sql = """
-        SELECT CASE ((CAST(strftime('%m', a.published_at) AS INTEGER) - 1) / 3)
-                   WHEN 0 THEN strftime('%Y', a.published_at) || '-01-01'
-                   WHEN 1 THEN strftime('%Y', a.published_at) || '-04-01'
-                   WHEN 2 THEN strftime('%Y', a.published_at) || '-07-01'
-                   WHEN 3 THEN strftime('%Y', a.published_at) || '-10-01'
-               END as day,
+async def get_sentiment_detailed(period: str = "3m") -> list[dict]:
+    """Get sentiment by day, country, and industry."""
+    bucket = _date_bucket_expr("a.published_at", period)
+    sql = f"""
+        SELECT {bucket} as day,
                country.key as country,
                sector.key as industry,
                SUM(CAST(sector.value AS REAL) * COALESCE(a.impact, 0)) / MAX(SUM(a.impact), 1) as avg_sentiment
@@ -553,7 +565,7 @@ async def get_sentiment_detailed() -> list[dict]:
         JOIN articles a ON r.article_id = a.id,
              json_each(r.signals) as country,
              json_each(country.value) as sector
-        WHERE a.published_at IS NOT NULL AND r.signals != '{}' AND a.impact IS NOT NULL
+        WHERE a.published_at IS NOT NULL AND r.signals != '{{}}' AND a.impact IS NOT NULL
         GROUP BY day, country, industry
         ORDER BY day
     """
@@ -566,15 +578,11 @@ async def get_sentiment_detailed() -> list[dict]:
         await db.close()
 
 
-async def get_company_sentiment_timeseries() -> list[dict]:
-    """Get company sentiment over time, grouped by ticker (quarterly)."""
-    sql = """
-        SELECT CASE ((CAST(strftime('%m', a.published_at) AS INTEGER) - 1) / 3)
-                   WHEN 0 THEN strftime('%Y', a.published_at) || '-01-01'
-                   WHEN 1 THEN strftime('%Y', a.published_at) || '-04-01'
-                   WHEN 2 THEN strftime('%Y', a.published_at) || '-07-01'
-                   WHEN 3 THEN strftime('%Y', a.published_at) || '-10-01'
-               END as day,
+async def get_company_sentiment_timeseries(period: str = "3m") -> list[dict]:
+    """Get company sentiment over time, grouped by ticker."""
+    bucket = _date_bucket_expr("a.published_at", period)
+    sql = f"""
+        SELECT {bucket} as day,
                cr.ticker as label,
                AVG(cr.sentiment) as avg_sentiment
         FROM company_results cr

@@ -157,6 +157,22 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Period switcher */
+.period-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+.period-btn.active {
+    background: var(--green);
+    color: white;
+    border-color: var(--green);
+}
+
 /* Counts */
 .kv-row {
     display: flex;
