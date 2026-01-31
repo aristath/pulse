@@ -408,13 +408,31 @@ async def get_stats(model_count: int = 1) -> dict:
         )[0]
 
         # Company scan stats
-        company_scanned = (
+        scan_threshold = float(await get_setting("scan_threshold") or "0.3")
+        scan_eligible = (
             await (
                 await db.execute(
-                    "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL"
+                    "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= ?",
+                    (scan_threshold,),
                 )
             ).fetchone()
         )[0]
+        # "Fully scanned" = scanned_aliases has the max alias count
+        max_alias_count = (
+            await (
+                await db.execute(
+                    "SELECT MAX(json_array_length(scanned_aliases)) FROM articles WHERE scanned_aliases IS NOT NULL"
+                )
+            ).fetchone()
+        )[0] or 0
+        company_scanned = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL AND json_array_length(scanned_aliases) >= ?",
+                    (max_alias_count,),
+                )
+            ).fetchone()
+        )[0] if max_alias_count > 0 else 0
         company_mentions = (
             await (await db.execute("SELECT COUNT(*) FROM company_results")).fetchone()
         )[0]
@@ -433,14 +451,14 @@ async def get_stats(model_count: int = 1) -> dict:
             ).fetchone()
         )[0]
 
-        # Build per-worker task counts keyed by processing_status keys
-        per_worker = {"impact": impact_scored}
+        # Build per-worker progress: (done, total) keyed by processing_status keys
+        per_worker = {"impact": (impact_scored, total)}
         for model_name, count in classify_counts.items():
-            per_worker[f"classify:{model_name}"] = count
-        per_worker["company-scanner"] = company_scanned
+            per_worker[f"classify:{model_name}"] = (count, impact_relevant)
+        per_worker["company-scanner"] = (company_scanned, scan_eligible)
         # Validate/sentiment are shared across models — show on first available
-        per_worker["validate:modernbert-nli"] = company_validated
-        per_worker["company_sentiment:modernbert-nli"] = company_scored
+        per_worker["validate:modernbert-nli"] = (company_validated, company_mentions)
+        per_worker["company_sentiment:modernbert-nli"] = (company_scored, company_validated)
 
         return {
             "total_articles": total,
