@@ -178,9 +178,60 @@
     border-bottom: 1px solid var(--border);
 }
 .model-row:last-child { border-bottom: none; }
+
+/* Feeds collapsible */
+.feeds-section {
+    margin-top: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.feeds-section summary {
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.feeds-section summary::-webkit-details-marker { display: none; }
+.feeds-section summary::before {
+    content: "\25B6";
+    font-size: 0.6rem;
+    transition: transform 0.15s;
+}
+.feeds-section[open] summary::before { transform: rotate(90deg); }
+.feeds-section .feeds-body {
+    padding: 0 1.25rem 1rem;
+}
+.feeds-section .form-row { margin-bottom: 0.75rem; }
+.feeds-section table { font-size: 0.85rem; }
+.feeds-section td, .feeds-section th { padding: 0.5rem 0.75rem; }
 </style>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
     {% include "partials/stats.html" %}
 </div>
+
+<details class="feeds-section">
+    <summary>Feeds ({{ feeds|length }})</summary>
+    <div class="feeds-body">
+        <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
+              hx-on::after-request="this.reset(); htmx.ajax('GET', '/partials/feeds', '#feeds-list')">
+            <div class="form-row">
+                <input type="url" name="url" placeholder="https://example.com/rss" required>
+                <input type="text" name="name" placeholder="Name (optional)" style="max-width: 200px;">
+                <button type="submit" class="btn btn-primary btn-sm">Add</button>
+            </div>
+        </form>
+        <div id="feeds-list">
+            {% include "partials/feeds_list.html" %}
+        </div>
+    </div>
+</details>
 {% endblock %}

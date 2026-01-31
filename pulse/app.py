@@ -80,6 +80,7 @@ app = FastAPI(title="Pulse", docs_url="/docs", lifespan=lifespan)
 async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
     avg_times = get_worker_avg_times()
+    feeds = await db.get_feeds()
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -87,20 +88,10 @@ async def dashboard(request: Request):
             "stats": stats,
             "processing": processing_status,
             "avg_times": avg_times,
-        },
-    )
-
-
-@app.get("/feeds", response_class=HTMLResponse)
-async def feeds_page(request: Request):
-    feeds = await db.get_feeds()
-    return templates.TemplateResponse(
-        "feeds.html",
-        {
-            "request": request,
             "feeds": feeds,
         },
     )
+
 
 
 
