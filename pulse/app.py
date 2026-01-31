@@ -103,17 +103,6 @@ async def feeds_page(request: Request):
     )
 
 
-@app.get("/articles", response_class=HTMLResponse)
-async def articles_page(request: Request):
-    articles = await db.get_articles(limit=50)
-    return templates.TemplateResponse(
-        "articles.html",
-        {
-            "request": request,
-            "articles": articles,
-        },
-    )
-
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
@@ -134,23 +123,6 @@ async def settings_page(request: Request):
         },
     )
 
-
-@app.get("/articles/{article_id}", response_class=HTMLResponse)
-async def article_detail(request: Request, article_id: int):
-    article = await db.get_article(article_id)
-    if not article:
-        raise HTTPException(404)
-    results = await db.get_results_for_article(article_id)
-    company_results = await db.get_company_results_for_article(article_id)
-    return templates.TemplateResponse(
-        "article_detail.html",
-        {
-            "request": request,
-            "article": article,
-            "results": results,
-            "company_results": company_results,
-        },
-    )
 
 
 @app.get("/charts", response_class=HTMLResponse)
