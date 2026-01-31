@@ -236,7 +236,13 @@
 .fundus-pub-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0; font-size: 0.8rem; }
 .fundus-pub-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
 .fundus-pub-row .domain { color: var(--text-dim); font-size: 0.7rem; }
+
+/* Charts */
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 700px) { .charts-grid { grid-template-columns: 1fr; } }
+.chart-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
     {% include "partials/stats.html" %}

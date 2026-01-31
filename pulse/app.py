@@ -103,9 +103,7 @@ async def dashboard(request: Request):
     )
 
 
-@app.get("/charts", response_class=HTMLResponse)
-async def charts_page(request: Request):
-    return templates.TemplateResponse("charts.html", {"request": request})
+
 
 
 # --- API Endpoints ---
