@@ -18,62 +18,66 @@
     </div>
 </div>
 
-<!-- Pipeline Flow -->
-<div class="dash-card">
-    <h3>Pipeline Flow</h3>
-    <div class="pipeline">
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.total_articles }}</span>
-            Ingested
-        </div>
-        <span class="pipeline-arrow">&rarr;</span>
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.impact_scored }}</span>
-            Impact Scored
-        </div>
-        <span class="pipeline-arrow">&rarr;</span>
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.impact_relevant }}</span>
-            Relevant
-        </div>
-        <span class="pipeline-arrow">&rarr;</span>
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.processed_articles }}</span>
-            NLI Classified
-        </div>
-        <span class="pipeline-arrow">&rarr;</span>
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.company_scanned }}</span>
-            Co. Scanned
-        </div>
-        <span class="pipeline-arrow">&rarr;</span>
-        <div class="pipeline-stage">
-            <span class="count">{{ stats.sent_articles }}</span>
-            Sent
-        </div>
-    </div>
-</div>
-
-<!-- Feeds (collapsible, preserved across HTMX swaps) -->
-<details id="feeds-section" class="feeds-section" hx-preserve="true">
-    <summary>Feeds ({{ feeds|length }})</summary>
-    <div class="feeds-body">
-        <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
-              hx-on::after-request="this.reset(); htmx.ajax('GET', '/partials/feeds', '#feeds-list')">
-            <div class="form-row">
-                <input type="url" name="url" placeholder="https://example.com/rss" required>
-                <input type="text" name="name" placeholder="Name (optional)" style="max-width: 200px;">
-                <button type="submit" class="btn btn-primary btn-sm">Add</button>
-            </div>
-        </form>
-        <div id="feeds-list">
-            {% include "partials/feeds_list.html" %}
-        </div>
-    </div>
-</details>
-
-<!-- Two columns -->
+<!-- Row 2: Two columns -->
 <div class="dash-columns">
+    <!-- Left column -->
+    <div>
+        <!-- Pipeline Flow -->
+        <div class="dash-card">
+            <h3>Pipeline Flow</h3>
+            <div class="pipeline">
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.total_articles }}</span>
+                    Ingested
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.impact_scored }}</span>
+                    Impact Scored
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.impact_relevant }}</span>
+                    Relevant
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.processed_articles }}</span>
+                    NLI Classified
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.company_scanned }}</span>
+                    Co. Scanned
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
+                    <span class="count">{{ stats.sent_articles }}</span>
+                    Sent
+                </div>
+            </div>
+        </div>
+
+        <!-- Feeds (collapsible, preserved across HTMX swaps) -->
+        <details id="feeds-section" class="feeds-section" hx-preserve="true">
+            <summary>Feeds ({{ feeds|length }})</summary>
+            <div class="feeds-body">
+                <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
+                      hx-on::after-request="this.reset(); htmx.ajax('GET', '/partials/feeds', '#feeds-list')">
+                    <div class="form-row">
+                        <input type="url" name="url" placeholder="https://example.com/rss" required>
+                        <input type="text" name="name" placeholder="Name (optional)" style="max-width: 200px;">
+                        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                    </div>
+                </form>
+                <div id="feeds-list">
+                    {% include "partials/feeds_list.html" %}
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- Right column -->
     <div>
         <!-- Workers -->
         <div class="dash-card">
