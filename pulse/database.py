@@ -511,6 +511,33 @@ async def get_sentiment_detailed() -> list[dict]:
         await db.close()
 
 
+async def get_company_sentiment_timeseries() -> list[dict]:
+    """Get company sentiment over time, grouped by ticker (quarterly)."""
+    sql = """
+        SELECT CASE ((CAST(strftime('%m', a.published_at) AS INTEGER) - 1) / 3)
+                   WHEN 0 THEN strftime('%Y', a.published_at) || '-01-01'
+                   WHEN 1 THEN strftime('%Y', a.published_at) || '-04-01'
+                   WHEN 2 THEN strftime('%Y', a.published_at) || '-07-01'
+                   WHEN 3 THEN strftime('%Y', a.published_at) || '-10-01'
+               END as day,
+               cr.ticker as label,
+               AVG(cr.sentiment) as avg_sentiment
+        FROM company_results cr
+        JOIN articles a ON cr.article_id = a.id
+        WHERE a.published_at IS NOT NULL
+          AND cr.sentiment IS NOT NULL
+        GROUP BY day, cr.ticker
+        ORDER BY day
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(sql)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
 # --- Settings ---
 
 # --- Alias Scans & Company Results ---

@@ -184,6 +184,11 @@ async def api_charts_detailed():
     return await db.get_sentiment_detailed()
 
 
+@app.get("/api/charts/companies")
+async def api_charts_companies():
+    return await db.get_company_sentiment_timeseries()
+
+
 @app.get("/api/stats")
 async def api_stats():
     return await db.get_stats(_model_count())

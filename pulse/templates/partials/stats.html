@@ -61,16 +61,26 @@
         <!-- Charts (preserved across HTMX swaps) -->
         <div id="charts-card" class="dash-card" hx-preserve="true">
             <h3>Sentiment Charts</h3>
+            <!-- Summary row -->
             <div class="charts-grid">
                 <div>
                     <div class="chart-label">By Country</div>
-                    <div id="chart-country" style="width:100%;height:300px;"></div>
+                    <div id="chart-country" style="width:100%;height:280px;"></div>
                 </div>
                 <div>
                     <div class="chart-label">By Industry</div>
-                    <div id="chart-industry" style="width:100%;height:300px;"></div>
+                    <div id="chart-industry" style="width:100%;height:280px;"></div>
                 </div>
             </div>
+            <!-- Dynamic per-industry charts -->
+            <div class="chart-label" style="margin-top:1rem;">By Industry (per country)</div>
+            <div id="industry-charts" class="charts-grid"></div>
+            <!-- Dynamic per-country charts -->
+            <div class="chart-label" style="margin-top:1rem;">By Country (per industry)</div>
+            <div id="country-charts" class="charts-grid"></div>
+            <!-- Dynamic per-company charts -->
+            <div class="chart-label" style="margin-top:1rem;">By Company</div>
+            <div id="company-charts" class="charts-grid"></div>
         </div>
 
         <!-- Feeds (collapsible, preserved across HTMX swaps) -->
@@ -237,6 +247,8 @@
             '#6366f1', '#22c55e', '#eab308', '#ef4444', '#3b82f6',
             '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'
         ];
+        var allCharts = [];
+
         function chartBaseOpts() {
             return {
                 backgroundColor: 'transparent',
@@ -279,6 +291,7 @@
                 series: []
             };
         }
+
         function chartBuildSeries(rows, labelKey) {
             var groups = {};
             for (var k = 0; k < rows.length; k++) {
@@ -295,22 +308,113 @@
                 };
             });
         }
+
+        function createMiniChart(container, title) {
+            var wrapper = document.createElement('div');
+            var lbl = document.createElement('div');
+            lbl.className = 'chart-label';
+            lbl.textContent = title;
+            wrapper.appendChild(lbl);
+            var div = document.createElement('div');
+            div.style.width = '100%';
+            div.style.height = '240px';
+            wrapper.appendChild(div);
+            container.appendChild(wrapper);
+            var chart = echarts.init(div);
+            chart.setOption(chartBaseOpts());
+            allCharts.push(chart);
+            return chart;
+        }
+
+        // Summary charts
         var cChart = echarts.init(document.getElementById('chart-country'));
         var iChart = echarts.init(document.getElementById('chart-industry'));
         cChart.setOption(chartBaseOpts());
         iChart.setOption(chartBaseOpts());
+        allCharts.push(cChart, iChart);
+
+        // Dynamic chart registries
+        var industryCharts = {};
+        var countryCharts = {};
+        var companyCharts = {};
+
         function refreshCharts() {
             Promise.all([
                 fetch('/api/charts/timeseries?group_by=country').then(function(r) { return r.json(); }),
-                fetch('/api/charts/timeseries?group_by=industry').then(function(r) { return r.json(); })
+                fetch('/api/charts/timeseries?group_by=industry').then(function(r) { return r.json(); }),
+                fetch('/api/charts/detailed').then(function(r) { return r.json(); }),
+                fetch('/api/charts/companies').then(function(r) { return r.json(); })
             ]).then(function(results) {
-                cChart.setOption({ series: chartBuildSeries(results[0], 'label') });
-                iChart.setOption({ series: chartBuildSeries(results[1], 'label') });
+                var cData = results[0], iData = results[1], dData = results[2], coData = results[3];
+
+                // Summary
+                cChart.setOption({ series: chartBuildSeries(cData, 'label') });
+                iChart.setOption({ series: chartBuildSeries(iData, 'label') });
+
+                // Group detailed data
+                var byIndustry = {}, byCountry = {};
+                for (var d = 0; d < dData.length; d++) {
+                    var r = dData[d];
+                    if (!byIndustry[r.industry]) byIndustry[r.industry] = [];
+                    byIndustry[r.industry].push(r);
+                    if (!byCountry[r.country]) byCountry[r.country] = [];
+                    byCountry[r.country].push(r);
+                }
+
+                // Per-industry charts
+                var iContainer = document.getElementById('industry-charts');
+                var industries = Object.keys(byIndustry).sort();
+                for (var ii = 0; ii < industries.length; ii++) {
+                    var ind = industries[ii];
+                    if (!industryCharts[ind]) {
+                        industryCharts[ind] = createMiniChart(iContainer, ind);
+                    }
+                    industryCharts[ind].setOption({ series: chartBuildSeries(byIndustry[ind], 'country') });
+                }
+
+                // Per-country charts
+                var cContainer = document.getElementById('country-charts');
+                var countries = Object.keys(byCountry).sort();
+                for (var ci = 0; ci < countries.length; ci++) {
+                    var cty = countries[ci];
+                    if (!countryCharts[cty]) {
+                        countryCharts[cty] = createMiniChart(cContainer, cty);
+                    }
+                    countryCharts[cty].setOption({ series: chartBuildSeries(byCountry[cty], 'industry') });
+                }
+
+                // Per-company charts — group by ticker
+                var byCompany = {};
+                for (var j = 0; j < coData.length; j++) {
+                    var cr = coData[j];
+                    if (!byCompany[cr.label]) byCompany[cr.label] = [];
+                    byCompany[cr.label].push(cr);
+                }
+                var coContainer = document.getElementById('company-charts');
+                var tickers = Object.keys(byCompany).sort();
+                for (var ti = 0; ti < tickers.length; ti++) {
+                    var tk = tickers[ti];
+                    if (!companyCharts[tk]) {
+                        companyCharts[tk] = createMiniChart(coContainer, tk);
+                    }
+                    // Single-series per company
+                    companyCharts[tk].setOption({
+                        series: [{
+                            name: tk, type: 'line',
+                            data: byCompany[tk].map(function(p) { return [p.day, p.avg_sentiment]; }),
+                            connectNulls: true, smooth: true, symbol: 'none',
+                            lineStyle: { width: 2 }, color: COLORS[ti % COLORS.length]
+                        }]
+                    });
+                }
             }).catch(function(e) { console.error('Chart refresh failed:', e); });
         }
+
         refreshCharts();
         setInterval(refreshCharts, 30000);
-        window.addEventListener('resize', function() { cChart.resize(); iChart.resize(); });
+        window.addEventListener('resize', function() {
+            allCharts.forEach(function(c) { c.resize(); });
+        });
     }
 
     // Load fundus publishers (only if container exists and empty)
