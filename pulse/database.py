@@ -562,19 +562,20 @@ async def get_company_sentiment_timeseries() -> list[dict]:
 
 
 async def get_article_missing_alias(alias: str) -> dict | None:
-    """Get an article that hasn't been scanned for this alias, with impact >= 0.3, highest impact first."""
+    """Get an article that hasn't been scanned for this alias, above impact threshold, highest impact first."""
+    threshold = float(await get_setting("scan_threshold") or "0.3")
     db = await get_db()
     try:
         cursor = await db.execute(
             """
             SELECT a.* FROM articles a
-            WHERE a.impact IS NOT NULL AND a.impact >= 0.3
+            WHERE a.impact IS NOT NULL AND a.impact >= ?
               AND (a.scanned_aliases IS NULL
                    OR ? NOT IN (SELECT value FROM json_each(a.scanned_aliases)))
             ORDER BY a.impact DESC
             LIMIT 1
         """,
-            (alias,),
+            (threshold, alias),
         )
         row = await cursor.fetchone()
         return dict(row) if row else None

@@ -86,6 +86,7 @@ async def dashboard(request: Request):
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
+    scan_threshold = await db.get_setting("scan_threshold") or "0.3"
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -100,6 +101,7 @@ async def dashboard(request: Request):
             "prompt_country": prompt_country,
             "prompt_sentiment": prompt_sentiment,
             "prompt_company": prompt_company,
+            "scan_threshold": scan_threshold,
         },
     )
 
@@ -327,6 +329,18 @@ async def api_set_prompts(
     return {"ok": True}
 
 
+@app.put("/api/settings/thresholds")
+async def api_set_thresholds(
+    request: Request,
+    scan_threshold: str = Form(None),
+):
+    if scan_threshold is None:
+        body = await request.json()
+        scan_threshold = body.get("scan_threshold", "0.3")
+    await db.set_setting("scan_threshold", (scan_threshold or "0.3").strip())
+    return {"ok": True}
+
+
 # --- SSE ---
 
 
@@ -361,6 +375,7 @@ async def partial_stats(request: Request):
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
+    scan_threshold = await db.get_setting("scan_threshold") or "0.3"
     return templates.TemplateResponse(
         "partials/stats.html",
         {
@@ -375,6 +390,7 @@ async def partial_stats(request: Request):
             "prompt_country": prompt_country,
             "prompt_sentiment": prompt_sentiment,
             "prompt_company": prompt_company,
+            "scan_threshold": scan_threshold,
         },
     )
 

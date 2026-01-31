@@ -145,6 +145,21 @@
                 </div>
 
                 <div class="settings-group">
+                    <h4>Thresholds</h4>
+                    <form hx-put="/api/settings/thresholds" hx-swap="none"
+                          hx-on::after-request="document.getElementById('threshold-status').textContent = 'Saved'; setTimeout(() => document.getElementById('threshold-status').textContent = '', 2000)">
+                        <div class="settings-field">
+                            <label>Company Scanner (impact &ge;)</label>
+                            <input type="number" name="scan_threshold" value="{{ scan_threshold }}" placeholder="0.3" step="0.05" min="0" max="1" style="max-width:100px;">
+                        </div>
+                        <div class="form-row">
+                            <button type="submit" class="btn btn-primary btn-sm">Save Thresholds</button>
+                            <span id="threshold-status" style="color: var(--green); font-size: 0.8rem;"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="settings-group">
                     <h4>Fundus Publishers</h4>
                     <div id="fundus-publishers">
                         <p style="color: var(--text-dim); font-size: 0.8rem;">Loading publishers...</p>
