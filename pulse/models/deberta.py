@@ -31,8 +31,14 @@ class DeBERTaNLI(BaseModel):
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
 
-    def classify(self, text: str, countries: list[str], sectors: dict[str, list[str]],
-                 prompt_country: str = "", prompt_sentiment: str = "") -> dict:
+    def classify(
+        self,
+        text: str,
+        countries: list[str],
+        sectors: dict[str, list[str]],
+        prompt_country: str = "",
+        prompt_sentiment: str = "",
+    ) -> dict:
         chunks = self._chunk_text(text)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
@@ -44,7 +50,9 @@ class DeBERTaNLI(BaseModel):
             scores = self._nli_batch(chunk, country_hypotheses)
             best_scores = [max(b, s) for b, s in zip(best_scores, scores)]
 
-        relevant = [c for c, s in zip(countries, best_scores) if s >= RELEVANCE_THRESHOLD]
+        relevant = [
+            c for c, s in zip(countries, best_scores) if s >= RELEVANCE_THRESHOLD
+        ]
         if not relevant:
             return {}
 
@@ -102,7 +110,9 @@ class DeBERTaNLI(BaseModel):
         # v2.0: 2-class (0=entailment, 1=not_entailment)
         return probs[:, 0].tolist()
 
-    def _nli_batch_full(self, premise: str, hypotheses: list[str]) -> tuple[list[float], list[float]]:
+    def _nli_batch_full(
+        self, premise: str, hypotheses: list[str]
+    ) -> tuple[list[float], list[float]]:
         """Batch NLI — return (entailment_scores, contradiction_scores)."""
         inputs = self._tokenizer(
             [premise] * len(hypotheses),

@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY,
     feed_id INTEGER REFERENCES feeds(id),
     url TEXT UNIQUE NOT NULL,
+    title TEXT,
+    content TEXT,
     published_at TIMESTAMP,
     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     sent_to_sentinel BOOLEAN DEFAULT 0,
@@ -70,11 +72,15 @@ async def init_db():
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
-        # Migration: add impact column if missing (existing DBs)
+        # Migration: add columns if missing (existing DBs)
         cursor = await db.execute("PRAGMA table_info(articles)")
         columns = {row[1] for row in await cursor.fetchall()}
         if "impact" not in columns:
             await db.execute("ALTER TABLE articles ADD COLUMN impact REAL")
+        if "title" not in columns:
+            await db.execute("ALTER TABLE articles ADD COLUMN title TEXT")
+        if "content" not in columns:
+            await db.execute("ALTER TABLE articles ADD COLUMN content TEXT")
         # Migration: add scanned_aliases column if missing (existing DBs)
         if "scanned_aliases" not in columns:
             await db.execute("ALTER TABLE articles ADD COLUMN scanned_aliases JSON")
@@ -91,6 +97,7 @@ async def init_db():
 
 
 # --- Feeds ---
+
 
 async def get_feeds(enabled_only: bool = False) -> list[dict]:
     db = await get_db()
@@ -141,6 +148,7 @@ async def update_feed(feed_id: int, **kwargs):
 
 # --- Articles ---
 
+
 async def add_article_url(url: str) -> int | None:
     """Insert a single article URL (no feed). Returns article id, or None if duplicate."""
     db = await get_db()
@@ -183,7 +191,8 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
     """
     db = await get_db()
     try:
-        cursor = await db.execute("""
+        cursor = await db.execute(
+            """
             SELECT a.* FROM articles a
             LEFT JOIN results r ON a.id = r.article_id AND r.model = ?
             WHERE r.id IS NULL
@@ -191,7 +200,9 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
               AND a.impact >= 0.5
             ORDER BY a.impact DESC
             LIMIT 1
-        """, (model,))
+        """,
+            (model,),
+        )
         row = await cursor.fetchone()
         return dict(row) if row else None
     finally:
@@ -271,9 +282,7 @@ async def update_article_date(article_id: int, published_at: str):
 async def get_article(article_id: int) -> dict | None:
     db = await get_db()
     try:
-        cursor = await db.execute(
-            "SELECT * FROM articles WHERE id = ?", (article_id,)
-        )
+        cursor = await db.execute("SELECT * FROM articles WHERE id = ?", (article_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
     finally:
@@ -281,6 +290,7 @@ async def get_article(article_id: int) -> dict | None:
 
 
 # --- Results ---
+
 
 async def save_result(article_id: int, model: str, signals: dict):
     db = await get_db()
@@ -342,20 +352,34 @@ async def get_unsent_articles() -> list[dict]:
 
 # --- Stats ---
 
+
 async def get_stats(model_count: int = 1) -> dict:
     db = await get_db()
     try:
-        total = (await (await db.execute("SELECT COUNT(*) FROM articles")).fetchone())[0]
-        processed = (await (await db.execute("""
+        total = (await (await db.execute("SELECT COUNT(*) FROM articles")).fetchone())[
+            0
+        ]
+        processed = (
+            await (
+                await db.execute(
+                    """
             SELECT COUNT(*) FROM (
                 SELECT article_id FROM results
                 GROUP BY article_id
                 HAVING COUNT(DISTINCT model) >= ?
             )
-        """, (model_count,))).fetchone())[0]
-        sent = (await (await db.execute(
-            "SELECT COUNT(*) FROM articles WHERE sent_to_sentinel = 1"
-        )).fetchone())[0]
+        """,
+                    (model_count,),
+                )
+            ).fetchone()
+        )[0]
+        sent = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM articles WHERE sent_to_sentinel = 1"
+                )
+            ).fetchone()
+        )[0]
         feeds = (await (await db.execute("SELECT COUNT(*) FROM feeds")).fetchone())[0]
 
         cursor = await db.execute(
@@ -364,23 +388,39 @@ async def get_stats(model_count: int = 1) -> dict:
         per_model = {row[0]: row[1] for row in await cursor.fetchall()}
 
         # Impact stats
-        impact_scored = (await (await db.execute(
-            "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL"
-        )).fetchone())[0]
-        impact_relevant = (await (await db.execute(
-            "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= 0.5"
-        )).fetchone())[0]
+        impact_scored = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL"
+                )
+            ).fetchone()
+        )[0]
+        impact_relevant = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM articles WHERE impact IS NOT NULL AND impact >= 0.5"
+                )
+            ).fetchone()
+        )[0]
 
         # Company scan stats
-        company_scanned = (await (await db.execute(
-            "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL"
-        )).fetchone())[0]
-        company_mentions = (await (await db.execute(
-            "SELECT COUNT(*) FROM company_results"
-        )).fetchone())[0]
-        company_scored = (await (await db.execute(
-            "SELECT COUNT(*) FROM company_results WHERE sentiment IS NOT NULL"
-        )).fetchone())[0]
+        company_scanned = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL"
+                )
+            ).fetchone()
+        )[0]
+        company_mentions = (
+            await (await db.execute("SELECT COUNT(*) FROM company_results")).fetchone()
+        )[0]
+        company_scored = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(*) FROM company_results WHERE sentiment IS NOT NULL"
+                )
+            ).fetchone()
+        )[0]
 
         return {
             "total_articles": total,
@@ -401,6 +441,7 @@ async def get_stats(model_count: int = 1) -> dict:
 
 
 # --- Charts ---
+
 
 async def get_sentiment_timeseries(group_by: str) -> list[dict]:
     """Get sentiment averaged over time, grouped by country or industry.
@@ -474,18 +515,22 @@ async def get_sentiment_detailed() -> list[dict]:
 
 # --- Alias Scans & Company Results ---
 
+
 async def get_article_missing_alias(alias: str) -> dict | None:
     """Get an article that hasn't been scanned for this alias, with impact >= 0.5, highest impact first."""
     db = await get_db()
     try:
-        cursor = await db.execute("""
+        cursor = await db.execute(
+            """
             SELECT a.* FROM articles a
             WHERE a.impact IS NOT NULL AND a.impact >= 0.5
               AND (a.scanned_aliases IS NULL
                    OR ? NOT IN (SELECT value FROM json_each(a.scanned_aliases)))
             ORDER BY a.impact DESC
             LIMIT 1
-        """, (alias,))
+        """,
+            (alias,),
+        )
         row = await cursor.fetchone()
         return dict(row) if row else None
     finally:
@@ -595,7 +640,9 @@ async def get_next_unscored_company_result() -> dict | None:
         await db.close()
 
 
-async def save_company_sentiment(article_id: int, ticker: str, sentiment: float, impact: float):
+async def save_company_sentiment(
+    article_id: int, ticker: str, sentiment: float, impact: float
+):
     """Update sentiment and impact for a company_results row."""
     db = await get_db()
     try:
@@ -626,6 +673,7 @@ async def get_company_results_for_article(article_id: int) -> list[dict]:
 
 # --- Settings ---
 
+
 async def get_setting(key: str) -> str | None:
     db = await get_db()
     try:
@@ -642,6 +690,64 @@ async def set_setting(key: str, value: str):
         await db.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             (key, value),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+# --- Fundus ---
+
+
+async def add_fundus_articles(articles: list[dict]) -> int:
+    """Bulk insert fundus articles with url, title, published_at, content.
+
+    feed_id is NULL for fundus articles. Duplicates are ignored via URL unique constraint.
+    Returns count of newly inserted articles.
+    """
+    db = await get_db()
+    try:
+        added = 0
+        for article in articles:
+            try:
+                await db.execute(
+                    "INSERT INTO articles (feed_id, url, title, content, published_at) VALUES (NULL, ?, ?, ?, ?)",
+                    (
+                        article["url"],
+                        article.get("title"),
+                        article.get("content"),
+                        article.get("published_at"),
+                    ),
+                )
+                added += 1
+            except aiosqlite.IntegrityError:
+                pass
+        await db.commit()
+        return added
+    finally:
+        await db.close()
+
+
+async def clear_processed_content(model_count: int):
+    """NULL out content for articles that have been fully processed.
+
+    An article is considered processed when impact IS NOT NULL and it has
+    results from at least model_count distinct models.
+    """
+    db = await get_db()
+    try:
+        await db.execute(
+            """
+            UPDATE articles SET content = NULL
+            WHERE content IS NOT NULL
+              AND impact IS NOT NULL
+              AND id IN (
+                  SELECT article_id FROM results
+                  GROUP BY article_id
+                  HAVING COUNT(DISTINCT model) >= ?
+              )
+        """,
+            (model_count,),
         )
         await db.commit()
     finally:

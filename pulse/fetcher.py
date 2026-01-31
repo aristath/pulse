@@ -10,9 +10,7 @@ from pulse.database import get_feeds, add_articles
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": "Pulse/0.1 (RSS Signal Generator)"
-}
+HEADERS = {"User-Agent": "Pulse/0.1 (RSS Signal Generator)"}
 
 
 async def fetch_all_feeds():
@@ -23,7 +21,9 @@ async def fetch_all_feeds():
         return
 
     total_new = 0
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        headers=HEADERS, timeout=30, follow_redirects=True
+    ) as client:
         for feed in feeds:
             try:
                 new = await _fetch_feed(client, feed)
@@ -47,14 +47,21 @@ async def _fetch_feed(client: httpx.AsyncClient, feed: dict) -> int:
             published_at = None
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 try:
-                    published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc).isoformat()
+                    published_at = datetime(
+                        *entry.published_parsed[:6], tzinfo=timezone.utc
+                    ).isoformat()
                 except Exception:
                     pass
             articles.append({"url": url, "published_at": published_at})
 
     if articles:
         new = await add_articles(feed["id"], articles)
-        logger.info("Feed '%s': %d new / %d total entries", feed.get("name") or feed["url"], new, len(articles))
+        logger.info(
+            "Feed '%s': %d new / %d total entries",
+            feed.get("name") or feed["url"],
+            new,
+            len(articles),
+        )
         return new
     return 0
 
@@ -87,7 +94,9 @@ async def fetch_article_content(url: str) -> tuple[str | None, str | None]:
         _cache_cleanup()
 
     try:
-        async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            headers=HEADERS, timeout=30, follow_redirects=True
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             html = resp.text
@@ -96,6 +105,7 @@ async def fetch_article_content(url: str) -> tuple[str | None, str | None]:
             content = doc.summary()
             # Strip HTML tags for plain text
             from lxml.html import fromstring
+
             tree = fromstring(content)
             text = tree.text_content().strip()
             if title:
@@ -111,10 +121,10 @@ async def fetch_article_content(url: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-
 def _extract_date_from_html(html: str) -> str | None:
     """Extract published date from common HTML meta tags."""
     import re
+
     # Common meta tag patterns for article dates
     patterns = [
         r'<meta[^>]+property="article:published_time"[^>]+content="([^"]+)"',

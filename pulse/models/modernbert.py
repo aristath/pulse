@@ -30,8 +30,14 @@ class ModernBERTNLI(BaseModel):
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
 
-    def classify(self, text: str, countries: list[str], sectors: dict[str, list[str]],
-                 prompt_country: str = "", prompt_sentiment: str = "") -> dict:
+    def classify(
+        self,
+        text: str,
+        countries: list[str],
+        sectors: dict[str, list[str]],
+        prompt_country: str = "",
+        prompt_sentiment: str = "",
+    ) -> dict:
         text = self.truncate(text, 6000)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
@@ -85,7 +91,9 @@ class ModernBERTNLI(BaseModel):
         # v2.0: 2-class (0=entailment, 1=not_entailment)
         return probs[:, 0].tolist()
 
-    def _nli_batch_full(self, premise: str, hypotheses: list[str]) -> tuple[list[float], list[float]]:
+    def _nli_batch_full(
+        self, premise: str, hypotheses: list[str]
+    ) -> tuple[list[float], list[float]]:
         """Batch NLI — return (entailment_scores, contradiction_scores)."""
         inputs = self._tokenizer(
             [premise] * len(hypotheses),

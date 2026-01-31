@@ -18,7 +18,7 @@
     </p>
 </div>
 
-<div class="card">
+<div class="card" style="margin-bottom: 1.5rem;">
     <h2>NLI Prompts</h2>
     <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1rem;">
         These are the hypothesis templates used by the NLI models. Leave blank to use defaults.
@@ -47,4 +47,150 @@
         </div>
     </form>
 </div>
+
+<div class="card" id="fundus-card">
+    <h2>Fundus Publishers</h2>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1rem;">
+        Select news publishers to crawl via <a href="https://github.com/flairNLP/fundus" target="_blank">fundus</a>. Articles are fetched every 10 minutes.
+    </p>
+    <div id="fundus-publishers" style="margin-bottom: 1rem;">
+        <p style="color: var(--text-dim); font-size: 0.85rem;">Loading publishers...</p>
+    </div>
+    <div class="form-row">
+        <button class="btn btn-primary" onclick="saveFundusPublishers()">Save</button>
+        <button class="btn btn-primary" onclick="triggerFundusCrawl(this)" style="background: var(--green);">Crawl Now</button>
+        <span id="fundus-status" style="color: var(--green); font-size: 0.85rem;"></span>
+    </div>
+</div>
+
+<style>
+    .fundus-country { margin-bottom: 0.25rem; }
+    .fundus-country-header {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        user-select: none;
+    }
+    .fundus-country-header:hover { background: rgba(99, 102, 241, 0.08); }
+    .fundus-country-header .arrow {
+        font-size: 0.7rem;
+        transition: transform 0.15s;
+        color: var(--text-dim);
+    }
+    .fundus-country-header .arrow.open { transform: rotate(90deg); }
+    .fundus-country-header .count {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        font-weight: 400;
+    }
+    .fundus-publishers-list {
+        display: none;
+        padding: 0.25rem 0 0.5rem 1.5rem;
+    }
+    .fundus-publishers-list.open { display: block; }
+    .fundus-pub-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.2rem 0;
+        font-size: 0.85rem;
+    }
+    .fundus-pub-row input[type="checkbox"] {
+        accent-color: var(--accent);
+        width: 14px;
+        height: 14px;
+    }
+    .fundus-pub-row .domain {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+    }
+</style>
+
+<script>
+(function() {
+    fetch('/api/fundus/publishers')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('fundus-publishers');
+            const countries = Object.keys(data).sort();
+            if (!countries.length) {
+                container.innerHTML = '<p style="color:var(--text-dim)">No publishers available.</p>';
+                return;
+            }
+            let html = '';
+            for (const country of countries) {
+                const pubs = data[country];
+                const enabledCount = pubs.filter(p => p.enabled).length;
+                const countLabel = enabledCount > 0
+                    ? `${enabledCount}/${pubs.length} enabled`
+                    : `${pubs.length}`;
+                html += `<div class="fundus-country">`;
+                html += `<div class="fundus-country-header" onclick="toggleCountry(this)">`;
+                html += `<span class="arrow">&#9654;</span>`;
+                html += `<span>${country.toUpperCase()}</span>`;
+                html += `<span class="count">(${countLabel})</span>`;
+                html += `</div>`;
+                html += `<div class="fundus-publishers-list">`;
+                for (const pub of pubs) {
+                    html += `<label class="fundus-pub-row">`;
+                    html += `<input type="checkbox" value="${pub.id}" ${pub.enabled ? 'checked' : ''}>`;
+                    html += `<span>${pub.name}</span>`;
+                    html += `<span class="domain">${pub.domain}</span>`;
+                    html += `</label>`;
+                }
+                html += `</div></div>`;
+            }
+            container.innerHTML = html;
+        })
+        .catch(() => {
+            document.getElementById('fundus-publishers').innerHTML =
+                '<p style="color:var(--red)">Failed to load publishers.</p>';
+        });
+})();
+
+function toggleCountry(header) {
+    const arrow = header.querySelector('.arrow');
+    const list = header.nextElementSibling;
+    arrow.classList.toggle('open');
+    list.classList.toggle('open');
+}
+
+function saveFundusPublishers() {
+    const checks = document.querySelectorAll('#fundus-publishers input[type="checkbox"]:checked');
+    const ids = Array.from(checks).map(c => c.value);
+    fetch('/api/fundus/publishers', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({publishers: ids})
+    }).then(r => r.json()).then(() => {
+        const el = document.getElementById('fundus-status');
+        el.textContent = 'Saved';
+        setTimeout(() => el.textContent = '', 2000);
+    });
+}
+
+function triggerFundusCrawl(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Crawling...';
+    fetch('/api/fundus/crawl', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('fundus-status');
+            el.textContent = `Crawl complete: ${data.added} new articles`;
+            setTimeout(() => el.textContent = '', 5000);
+        })
+        .catch(() => {
+            document.getElementById('fundus-status').textContent = 'Crawl failed';
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Crawl Now';
+        });
+}
+</script>
 {% endblock %}

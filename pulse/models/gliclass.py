@@ -22,11 +22,16 @@ class GLiClassLarge(BaseModel):
         model = GLiClassModel.from_pretrained(model_id)
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._pipeline = ZeroShotClassificationPipeline(
-            model=model, tokenizer=tokenizer, classification_type="multi-label", device="cpu"
+            model=model,
+            tokenizer=tokenizer,
+            classification_type="multi-label",
+            device="cpu",
         )
         logger.info("%s loaded", self.name)
 
-    def classify(self, text: str, countries: list[str], sectors: dict[str, list[str]]) -> dict:
+    def classify(
+        self, text: str, countries: list[str], sectors: dict[str, list[str]]
+    ) -> dict:
         text = self.truncate(text, 6000)
         return _gliclass_classify(self._pipeline, text, countries, sectors)
 
@@ -43,11 +48,16 @@ class GLiClassBase(BaseModel):
         model = GLiClassModel.from_pretrained(model_id)
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._pipeline = ZeroShotClassificationPipeline(
-            model=model, tokenizer=tokenizer, classification_type="multi-label", device="cpu"
+            model=model,
+            tokenizer=tokenizer,
+            classification_type="multi-label",
+            device="cpu",
         )
         logger.info("%s loaded", self.name)
 
-    def classify(self, text: str, countries: list[str], sectors: dict[str, list[str]]) -> dict:
+    def classify(
+        self, text: str, countries: list[str], sectors: dict[str, list[str]]
+    ) -> dict:
         text = self.truncate(text, 6000)
         return _gliclass_classify(self._pipeline, text, countries, sectors)
 

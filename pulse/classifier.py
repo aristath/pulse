@@ -13,12 +13,22 @@ from pulse.models.finbert import FinBERT
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
 from pulse.database import (
-    get_unprocessed_article_for_model, get_next_article_for_impact,
-    get_setting, save_result, save_impact, update_article_date,
-    get_article_missing_alias, get_scanned_aliases, save_scanned_aliases,
-    save_company_mention, get_next_unscored_company_result,
-    save_company_sentiment, get_next_unvalidated_company_result,
-    mark_company_result_validated, delete_company_result,
+    get_unprocessed_article_for_model,
+    get_next_article_for_impact,
+    get_setting,
+    save_result,
+    save_impact,
+    update_article_date,
+    get_article,
+    get_article_missing_alias,
+    get_scanned_aliases,
+    save_scanned_aliases,
+    save_company_mention,
+    get_next_unscored_company_result,
+    save_company_sentiment,
+    get_next_unvalidated_company_result,
+    mark_company_result_validated,
+    delete_company_result,
 )
 from pulse.fetcher import fetch_article_content
 
@@ -43,13 +53,29 @@ def _cpu_sleep() -> float:
         return 0.0
     return 1.0 + (cpu - 80) * 0.45
 
+
 # Each worker pulls tasks in priority order.
 # Capabilities: (task_type, model_name_or_None)
 WORKER_CONFIGS = [
-    ("modernbert-nli", [("impact", None), ("classify", "modernbert-nli"), ("validate", "modernbert-nli"), ("company_sentiment", "modernbert-nli")]),
-    ("deberta-nli",    [("classify", "deberta-nli"), ("validate", "deberta-nli"), ("company_sentiment", "deberta-nli")]),
-    ("finbert",        [("classify", "finbert")]),
-    ("company-scanner",[("scan", None)]),
+    (
+        "modernbert-nli",
+        [
+            ("impact", None),
+            ("classify", "modernbert-nli"),
+            ("validate", "modernbert-nli"),
+            ("company_sentiment", "modernbert-nli"),
+        ],
+    ),
+    (
+        "deberta-nli",
+        [
+            ("classify", "deberta-nli"),
+            ("validate", "deberta-nli"),
+            ("company_sentiment", "deberta-nli"),
+        ],
+    ),
+    ("finbert", [("classify", "finbert")]),
+    ("company-scanner", [("scan", None)]),
 ]
 
 
@@ -178,7 +204,8 @@ class EnsembleClassifier:
 
             logger.info(
                 "Labels from Sentinel: %d geographies, %d industries",
-                len(self._countries), len(industries),
+                len(self._countries),
+                len(industries),
             )
             return True
         except Exception:
@@ -217,14 +244,22 @@ class EnsembleClassifier:
             "started_at": time.time(),
         }
 
-        logger.info("[%s] Classifying article %d: %s", model_name, article["id"], article["url"])
+        logger.info(
+            "[%s] Classifying article %d: %s", model_name, article["id"], article["url"]
+        )
 
-        content, published_at = await fetch_article_content(article["url"])
+        if article.get("content"):
+            content = article["content"]
+            published_at = article.get("published_at")
+        else:
+            content, published_at = await fetch_article_content(article["url"])
         if published_at and not article.get("published_at"):
             await update_article_date(article["id"], published_at)
 
         if not content:
-            logger.warning("[%s] Could not fetch content for article %d", model_name, article["id"])
+            logger.warning(
+                "[%s] Could not fetch content for article %d", model_name, article["id"]
+            )
             await save_result(article["id"], model_name, {})
             self._clear_model_status(model_name)
             return True
@@ -250,7 +285,12 @@ class EnsembleClassifier:
         self._clear_model_status(model_name)
         delay = _thermal_delay()
         if delay > 0:
-            logger.info("[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)", model_name, delay, thermal_throttle["temp"])
+            logger.info(
+                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
+                model_name,
+                delay,
+                thermal_throttle["temp"],
+            )
             await asyncio.sleep(delay)
         return True
 
@@ -276,12 +316,18 @@ class EnsembleClassifier:
 
         logger.info("[impact] Scoring article %d: %s", article["id"], article["url"])
 
-        content, published_at = await fetch_article_content(article["url"])
+        if article.get("content"):
+            content = article["content"]
+            published_at = article.get("published_at")
+        else:
+            content, published_at = await fetch_article_content(article["url"])
         if published_at and not article.get("published_at"):
             await update_article_date(article["id"], published_at)
 
         if not content:
-            logger.warning("[impact] Could not fetch content for article %d", article["id"])
+            logger.warning(
+                "[impact] Could not fetch content for article %d", article["id"]
+            )
             await save_impact(article["id"], 0.0)
             self._clear_model_status(self._impact_scorer.name)
             return True
@@ -303,7 +349,11 @@ class EnsembleClassifier:
         self._clear_model_status(self._impact_scorer.name)
         delay = _thermal_delay()
         if delay > 0:
-            logger.info("[impact] Thermal throttle: %.0fs pause (CPU %.0f°C)", delay, thermal_throttle["temp"])
+            logger.info(
+                "[impact] Thermal throttle: %.0fs pause (CPU %.0f°C)",
+                delay,
+                thermal_throttle["temp"],
+            )
             await asyncio.sleep(delay)
         return True
 
@@ -332,7 +382,9 @@ class EnsembleClassifier:
                 aliases = [name]
                 raw_aliases = entry.get("aliases")
                 if raw_aliases:
-                    aliases.extend(a.strip() for a in raw_aliases.split(",") if a.strip())
+                    aliases.extend(
+                        a.strip() for a in raw_aliases.split(",") if a.strip()
+                    )
                 ticker_aliases[symbol] = aliases
 
             self._ticker_aliases = ticker_aliases
@@ -344,8 +396,11 @@ class EnsembleClassifier:
                 ticker_aliases,
             )
 
-            logger.info("Aliases from Sentinel: %d tickers, %d aliases total",
-                        len(ticker_aliases), len(self._company_scanner.all_aliases))
+            logger.info(
+                "Aliases from Sentinel: %d tickers, %d aliases total",
+                len(ticker_aliases),
+                len(self._company_scanner.all_aliases),
+            )
             return True
         except Exception:
             logger.exception("Failed to fetch aliases from Sentinel")
@@ -387,10 +442,18 @@ class EnsembleClassifier:
         stored_set = set(stored)
         missing = [a for a in all_aliases if a not in stored_set]
 
-        logger.info("[company-scanner] Scanning article %d (%d missing aliases): %s",
-                     article["id"], len(missing), article["url"])
+        logger.info(
+            "[company-scanner] Scanning article %d (%d missing aliases): %s",
+            article["id"],
+            len(missing),
+            article["url"],
+        )
 
-        content, published_at = await fetch_article_content(article["url"])
+        if article.get("content"):
+            content = article["content"]
+            published_at = article.get("published_at")
+        else:
+            content, published_at = await fetch_article_content(article["url"])
         if published_at and not article.get("published_at"):
             await update_article_date(article["id"], published_at)
 
@@ -405,7 +468,9 @@ class EnsembleClassifier:
                     missing,
                 )
             except Exception as e:
-                logger.error("[company-scanner] Failed on article %d: %s", article["id"], e)
+                logger.error(
+                    "[company-scanner] Failed on article %d: %s", article["id"], e
+                )
 
         # Save company mentions for matched aliases
         matched_tickers = set()
@@ -417,7 +482,11 @@ class EnsembleClassifier:
                 await save_company_mention(article["id"], ticker)
 
         if matched_tickers:
-            logger.info("[company-scanner] Article %d: matched %s", article["id"], matched_tickers)
+            logger.info(
+                "[company-scanner] Article %d: matched %s",
+                article["id"],
+                matched_tickers,
+            )
 
         # Mark article as scanned for the full current alias list
         await save_scanned_aliases(article["id"], all_aliases)
@@ -460,9 +529,17 @@ class EnsembleClassifier:
 
         logger.info("[validate] Checking %s for article %d", ticker, article_id)
 
-        content, _ = await fetch_article_content(article_url)
+        # Fetch the full article to check for stored content
+        full_article = await get_article(article_id)
+        if full_article and full_article.get("content"):
+            content = full_article["content"]
+        else:
+            content, _ = await fetch_article_content(article_url)
         if not content:
-            logger.warning("[validate] Could not fetch content for article %d — rejecting", article_id)
+            logger.warning(
+                "[validate] Could not fetch content for article %d — rejecting",
+                article_id,
+            )
             await delete_company_result(article_id, ticker)
             self._clear_model_status("company-validate")
             return True
@@ -489,12 +566,24 @@ class EnsembleClassifier:
             entail = entail_scores[0]
             if entail >= 0.5:
                 await mark_company_result_validated(article_id, ticker)
-                logger.info("[validate] ACCEPTED %s for article %d (entail=%.4f)", ticker, article_id, entail)
+                logger.info(
+                    "[validate] ACCEPTED %s for article %d (entail=%.4f)",
+                    ticker,
+                    article_id,
+                    entail,
+                )
             else:
                 await delete_company_result(article_id, ticker)
-                logger.info("[validate] REJECTED %s for article %d (entail=%.4f)", ticker, article_id, entail)
+                logger.info(
+                    "[validate] REJECTED %s for article %d (entail=%.4f)",
+                    ticker,
+                    article_id,
+                    entail,
+                )
         except Exception as e:
-            logger.error("[validate] Failed for %s article %d: %s", ticker, article_id, e)
+            logger.error(
+                "[validate] Failed for %s article %d: %s", ticker, article_id, e
+            )
             await delete_company_result(article_id, ticker)
 
         self._clear_model_status("company-validate")
@@ -503,7 +592,9 @@ class EnsembleClassifier:
             await asyncio.sleep(delay)
         return True
 
-    async def classify_next_company_sentiment(self, model_name: str | None = None) -> bool:
+    async def classify_next_company_sentiment(
+        self, model_name: str | None = None
+    ) -> bool:
         """Pick an unscored company_results row, run NLI sentiment, save.
 
         Returns True if a row was scored, False if none available.
@@ -539,11 +630,21 @@ class EnsembleClassifier:
                 "started_at": time.time(),
             }
 
-            logger.info("[company-sentiment] Scoring %s for article %d", ticker, article_id)
+            logger.info(
+                "[company-sentiment] Scoring %s for article %d", ticker, article_id
+            )
 
-            content, _ = await fetch_article_content(article_url)
+            # Fetch the full article to check for stored content
+            full_article = await get_article(article_id)
+            if full_article and full_article.get("content"):
+                content = full_article["content"]
+            else:
+                content, _ = await fetch_article_content(article_url)
             if not content:
-                logger.warning("[company-sentiment] Could not fetch content for article %d", article_id)
+                logger.warning(
+                    "[company-sentiment] Could not fetch content for article %d",
+                    article_id,
+                )
                 await save_company_sentiment(article_id, ticker, 0.0, 0.0)
                 self._clear_model_status("company-sentiment")
                 return True
@@ -553,7 +654,9 @@ class EnsembleClassifier:
             if model_name:
                 model = self._get_model(model_name)
             if not model:
-                model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
+                model = self._get_model("modernbert-nli") or self._get_model(
+                    "deberta-nli"
+                )
             if not model:
                 self._clear_model_status("company-sentiment")
                 return False
@@ -573,10 +676,20 @@ class EnsembleClassifier:
                 sentiment = max(-1.0, min(1.0, sentiment))
                 impact = round(max(entail_scores[0], contra_scores[0]), 4)
                 await save_company_sentiment(article_id, ticker, sentiment, impact)
-                logger.info("[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
-                            ticker, article_id, sentiment, impact)
+                logger.info(
+                    "[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
+                    ticker,
+                    article_id,
+                    sentiment,
+                    impact,
+                )
             except Exception as e:
-                logger.error("[company-sentiment] Failed for %s article %d: %s", ticker, article_id, e)
+                logger.error(
+                    "[company-sentiment] Failed for %s article %d: %s",
+                    ticker,
+                    article_id,
+                    e,
+                )
                 await save_company_sentiment(article_id, ticker, 0.0, 0.0)
 
             self._clear_model_status("company-sentiment")
@@ -598,7 +711,9 @@ class EnsembleClassifier:
             "started_at": None,
         }
 
-    async def _worker_loop(self, worker_name: str, capabilities: list[tuple[str, str | None]]):
+    async def _worker_loop(
+        self, worker_name: str, capabilities: list[tuple[str, str | None]]
+    ):
         """Pull-based worker: try each capability in priority order, execute first available, sleep if none."""
         # Wait for models to load
         while _workers_running and not self._loaded:
@@ -619,11 +734,17 @@ class EnsembleClassifier:
                         elif task_type == "scan":
                             did_work = await self.scan_next_article()
                         elif task_type == "validate":
-                            did_work = await self.validate_next_company_match(model_name=model)
+                            did_work = await self.validate_next_company_match(
+                                model_name=model
+                            )
                         elif task_type == "company_sentiment":
-                            did_work = await self.classify_next_company_sentiment(model_name=model)
+                            did_work = await self.classify_next_company_sentiment(
+                                model_name=model
+                            )
                     except Exception:
-                        logger.exception("[worker:%s] Error in %s", worker_name, task_type)
+                        logger.exception(
+                            "[worker:%s] Error in %s", worker_name, task_type
+                        )
                     if did_work:
                         break
 

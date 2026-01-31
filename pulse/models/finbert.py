@@ -32,8 +32,14 @@ class FinBERT(BaseModel):
         self._model.eval()
         logger.info("%s loaded", self.name)
 
-    def classify(self, text: str, countries: list[str], sectors: dict[str, list[str]],
-                 prompt_country: str = "", prompt_sentiment: str = "") -> dict:
+    def classify(
+        self,
+        text: str,
+        countries: list[str],
+        sectors: dict[str, list[str]],
+        prompt_country: str = "",
+        prompt_sentiment: str = "",
+    ) -> dict:
         text_lower = text.lower()
 
         # Pass 1: Which countries are mentioned?

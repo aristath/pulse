@@ -16,10 +16,17 @@ from sse_starlette.sse import EventSourceResponse
 from pulse import database as db
 from pulse.classifier import ensemble, processing_status, start_workers, stop_workers
 from pulse.fetcher import fetch_all_feeds
+from pulse.fundus_crawler import (
+    get_available_publishers,
+    get_enabled_publisher_ids,
+    crawl_enabled_publishers,
+)
 from pulse.scheduler import start_scheduler, stop_scheduler
+
 
 def _model_count() -> int:
     return max(len(ensemble.model_names), 1)
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +57,11 @@ async def lifespan(app: FastAPI):
 
 # --- Pydantic models ---
 
+
 class FeedCreate(PydanticModel):
     url: str
     name: str | None = None
+
 
 class FeedUpdate(PydanticModel):
     enabled: bool | None = None
@@ -66,32 +75,42 @@ app = FastAPI(title="Pulse", docs_url="/docs", lifespan=lifespan)
 
 # --- HTML Pages ---
 
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "stats": stats,
-        "processing": processing_status,
-    })
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "stats": stats,
+            "processing": processing_status,
+        },
+    )
 
 
 @app.get("/feeds", response_class=HTMLResponse)
 async def feeds_page(request: Request):
     feeds = await db.get_feeds()
-    return templates.TemplateResponse("feeds.html", {
-        "request": request,
-        "feeds": feeds,
-    })
+    return templates.TemplateResponse(
+        "feeds.html",
+        {
+            "request": request,
+            "feeds": feeds,
+        },
+    )
 
 
 @app.get("/articles", response_class=HTMLResponse)
 async def articles_page(request: Request):
     articles = await db.get_articles(limit=50)
-    return templates.TemplateResponse("articles.html", {
-        "request": request,
-        "articles": articles,
-    })
+    return templates.TemplateResponse(
+        "articles.html",
+        {
+            "request": request,
+            "articles": articles,
+        },
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -101,14 +120,17 @@ async def settings_page(request: Request):
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
-        "sentinel_url": sentinel_url,
-        "prompt_impact": prompt_impact,
-        "prompt_country": prompt_country,
-        "prompt_sentiment": prompt_sentiment,
-        "prompt_company": prompt_company,
-    })
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "sentinel_url": sentinel_url,
+            "prompt_impact": prompt_impact,
+            "prompt_country": prompt_country,
+            "prompt_sentiment": prompt_sentiment,
+            "prompt_company": prompt_company,
+        },
+    )
 
 
 @app.get("/articles/{article_id}", response_class=HTMLResponse)
@@ -118,12 +140,15 @@ async def article_detail(request: Request, article_id: int):
         raise HTTPException(404)
     results = await db.get_results_for_article(article_id)
     company_results = await db.get_company_results_for_article(article_id)
-    return templates.TemplateResponse("article_detail.html", {
-        "request": request,
-        "article": article,
-        "results": results,
-        "company_results": company_results,
-    })
+    return templates.TemplateResponse(
+        "article_detail.html",
+        {
+            "request": request,
+            "article": article,
+            "results": results,
+            "company_results": company_results,
+        },
+    )
 
 
 @app.get("/charts", response_class=HTMLResponse)
@@ -132,6 +157,7 @@ async def charts_page(request: Request):
 
 
 # --- API Endpoints ---
+
 
 @app.get("/api/feeds")
 async def api_list_feeds():
@@ -246,6 +272,7 @@ def _sample_stats():
     # Prime the non-blocking CPU counter
     psutil.cpu_percent(interval=None)
     import time
+
     while True:
         time.sleep(2)
         _cached_stats["cpu_percent"] = psutil.cpu_percent(interval=None)
@@ -270,6 +297,36 @@ async def api_trigger_fetch():
     """Manually trigger RSS feed fetch."""
     await fetch_all_feeds()
     return {"ok": True}
+
+
+# --- Fundus ---
+
+
+@app.get("/api/fundus/publishers")
+async def api_fundus_publishers():
+    """Return full publisher catalog with enabled flags."""
+    catalog = get_available_publishers()
+    enabled = set(await get_enabled_publisher_ids())
+    result = {}
+    for country, publishers in catalog.items():
+        result[country] = [{**p, "enabled": p["id"] in enabled} for p in publishers]
+    return result
+
+
+@app.put("/api/fundus/publishers")
+async def api_set_fundus_publishers(request: Request):
+    """Save enabled fundus publisher IDs."""
+    body = await request.json()
+    publisher_ids = body.get("publishers", [])
+    await db.set_setting("fundus_publishers", json.dumps(publisher_ids))
+    return {"ok": True}
+
+
+@app.post("/api/fundus/crawl")
+async def api_trigger_fundus_crawl():
+    """Manually trigger fundus crawl."""
+    added = await crawl_enabled_publishers()
+    return {"ok": True, "added": added}
 
 
 @app.get("/api/settings/sentinel_url")
@@ -316,6 +373,7 @@ async def api_set_prompts(
 
 # --- SSE ---
 
+
 @app.get("/api/events")
 async def sse_events(request: Request):
     async def event_generator():
@@ -335,29 +393,39 @@ async def sse_events(request: Request):
 
 # --- HTMX Partials ---
 
+
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
-    return templates.TemplateResponse("partials/stats.html", {
-        "request": request,
-        "stats": stats,
-        "processing": processing_status,
-    })
+    return templates.TemplateResponse(
+        "partials/stats.html",
+        {
+            "request": request,
+            "stats": stats,
+            "processing": processing_status,
+        },
+    )
 
 
 @app.get("/partials/system-stats", response_class=HTMLResponse)
 async def partial_system_stats(request: Request):
     stats = _get_system_stats()
-    return templates.TemplateResponse("partials/system_stats.html", {
-        "request": request,
-        "sys": stats,
-    })
+    return templates.TemplateResponse(
+        "partials/system_stats.html",
+        {
+            "request": request,
+            "sys": stats,
+        },
+    )
 
 
 @app.get("/partials/feeds", response_class=HTMLResponse)
 async def partial_feeds(request: Request):
     feeds = await db.get_feeds()
-    return templates.TemplateResponse("partials/feeds_list.html", {
-        "request": request,
-        "feeds": feeds,
-    })
+    return templates.TemplateResponse(
+        "partials/feeds_list.html",
+        {
+            "request": request,
+            "feeds": feeds,
+        },
+    )
