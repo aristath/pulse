@@ -181,7 +181,7 @@
 
 /* Feeds collapsible */
 .feeds-section {
-    margin-top: 1rem;
+    margin-bottom: 1rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -217,21 +217,4 @@
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
     {% include "partials/stats.html" %}
 </div>
-
-<details class="feeds-section">
-    <summary>Feeds ({{ feeds|length }})</summary>
-    <div class="feeds-body">
-        <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
-              hx-on::after-request="this.reset(); htmx.ajax('GET', '/partials/feeds', '#feeds-list')">
-            <div class="form-row">
-                <input type="url" name="url" placeholder="https://example.com/rss" required>
-                <input type="text" name="name" placeholder="Name (optional)" style="max-width: 200px;">
-                <button type="submit" class="btn btn-primary btn-sm">Add</button>
-            </div>
-        </form>
-        <div id="feeds-list">
-            {% include "partials/feeds_list.html" %}
-        </div>
-    </div>
-</details>
 {% endblock %}

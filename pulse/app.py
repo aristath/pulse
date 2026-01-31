@@ -364,6 +364,7 @@ async def sse_events(request: Request):
 async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
     avg_times = get_worker_avg_times()
+    feeds = await db.get_feeds()
     return templates.TemplateResponse(
         "partials/stats.html",
         {
@@ -371,6 +372,7 @@ async def partial_stats(request: Request):
             "stats": stats,
             "processing": processing_status,
             "avg_times": avg_times,
+            "feeds": feeds,
         },
     )
 
