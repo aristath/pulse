@@ -71,9 +71,17 @@ class CompanyScanner:
 
         logger.info("Alias map ready (%d aliases)", len(self._all_aliases))
 
-    def scan(self, text: str) -> list[str]:
-        """Scan text for company mentions. Returns list of matched alias strings."""
+    def scan(self, text: str, aliases: list[str] | None = None) -> list[str]:
+        """Scan text for company mentions. Returns list of matched alias strings.
+
+        If aliases is provided, fuzzy-match only against those.
+        Otherwise match against all known aliases.
+        """
         if not self.ready:
+            return []
+
+        candidates = aliases if aliases is not None else self._all_aliases
+        if not candidates:
             return []
 
         doc = self._nlp(text)
@@ -86,7 +94,7 @@ class CompanyScanner:
         for span in org_spans:
             result = process.extractOne(
                 span,
-                self._all_aliases,
+                candidates,
                 scorer=fuzz.token_set_ratio,
                 score_cutoff=FUZZY_THRESHOLD,
             )

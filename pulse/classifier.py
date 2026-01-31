@@ -15,9 +15,10 @@ from pulse.models.gliner import CompanyScanner
 from pulse.database import (
     get_unprocessed_article_for_model, get_next_article_for_impact,
     get_setting, save_result, save_impact, update_article_date,
-    save_alias_scan, get_unscanned_article_for_alias,
+    get_article_missing_alias, get_scanned_aliases, save_scanned_aliases,
     save_company_mention, get_next_unscored_company_result,
-    save_company_sentiment,
+    save_company_sentiment, get_next_unvalidated_company_result,
+    mark_company_result_validated, delete_company_result,
 )
 from pulse.fetcher import fetch_article_content
 
@@ -32,13 +33,21 @@ thermal_throttle: dict = {"delay": 0.0, "temp": None}
 # --- Worker infrastructure ---
 _workers_running = False
 _worker_tasks: list[asyncio.Task] = []
-IDLE_SLEEP = 2.0
+IDLE_SLEEP_NONE = 2.0  # seconds to sleep when no work available
+
+
+def _cpu_sleep() -> float:
+    """Adaptive sleep based on CPU usage. 0s below 80%, linear 1-10s from 80-100%."""
+    cpu = psutil.cpu_percent(interval=None)
+    if cpu < 80:
+        return 0.0
+    return 1.0 + (cpu - 80) * 0.45
 
 # Each worker pulls tasks in priority order.
 # Capabilities: (task_type, model_name_or_None)
 WORKER_CONFIGS = [
-    ("modernbert-nli", [("impact", None), ("classify", "modernbert-nli"), ("company_sentiment", "modernbert-nli")]),
-    ("deberta-nli",    [("classify", "deberta-nli"), ("company_sentiment", "deberta-nli")]),
+    ("modernbert-nli", [("impact", None), ("classify", "modernbert-nli"), ("validate", "modernbert-nli"), ("company_sentiment", "modernbert-nli")]),
+    ("deberta-nli",    [("classify", "deberta-nli"), ("validate", "deberta-nli"), ("company_sentiment", "deberta-nli")]),
     ("finbert",        [("classify", "finbert")]),
     ("company-scanner",[("scan", None)]),
 ]
@@ -127,6 +136,11 @@ class EnsembleClassifier:
             try:
                 self._company_scanner.load()
                 processing_status["company-scanner"] = {
+                    "article_id": None,
+                    "article_url": None,
+                    "started_at": None,
+                }
+                processing_status["company-validate"] = {
                     "article_id": None,
                     "article_url": None,
                     "started_at": None,
@@ -338,7 +352,7 @@ class EnsembleClassifier:
             return False
 
     async def scan_next_article(self) -> bool:
-        """Find an article with unscanned aliases, scan it, record results.
+        """Find an article missing aliases, scan incrementally, record results.
 
         Returns True if an article was scanned, False if none available.
         """
@@ -354,9 +368,12 @@ class EnsembleClassifier:
         if not all_aliases:
             return False
 
-        # Find an article that hasn't been scanned for any alias yet.
-        # We use the first alias as a proxy — all aliases are recorded together.
-        article = await get_unscanned_article_for_alias(all_aliases[0])
+        # Find an article that is missing at least one alias
+        article = None
+        for alias in all_aliases:
+            article = await get_article_missing_alias(alias)
+            if article:
+                break
         if not article:
             return False
 
@@ -366,27 +383,29 @@ class EnsembleClassifier:
             "started_at": time.time(),
         }
 
-        logger.info("[company-scanner] Scanning article %d: %s", article["id"], article["url"])
+        stored = await get_scanned_aliases(article["id"])
+        stored_set = set(stored)
+        missing = [a for a in all_aliases if a not in stored_set]
+
+        logger.info("[company-scanner] Scanning article %d (%d missing aliases): %s",
+                     article["id"], len(missing), article["url"])
 
         content, published_at = await fetch_article_content(article["url"])
         if published_at and not article.get("published_at"):
             await update_article_date(article["id"], published_at)
 
         matched_aliases: list[str] = []
-        if content:
+        if content and missing:
             loop = asyncio.get_event_loop()
             try:
                 matched_aliases = await loop.run_in_executor(
                     self._executor,
                     self._company_scanner.scan,
                     content,
+                    missing,
                 )
             except Exception as e:
                 logger.error("[company-scanner] Failed on article %d: %s", article["id"], e)
-
-        # Record alias_scans for ALL aliases (marks article as fully scanned)
-        for alias in all_aliases:
-            await save_alias_scan(article["id"], alias)
 
         # Save company mentions for matched aliases
         matched_tickers = set()
@@ -400,7 +419,85 @@ class EnsembleClassifier:
         if matched_tickers:
             logger.info("[company-scanner] Article %d: matched %s", article["id"], matched_tickers)
 
+        # Mark article as scanned for the full current alias list
+        await save_scanned_aliases(article["id"], all_aliases)
+
         self._clear_model_status("company-scanner")
+        delay = _thermal_delay()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        return True
+
+    async def validate_next_company_match(self, model_name: str | None = None) -> bool:
+        """Validate a company scanner candidate using NLI.
+
+        Tests "This article is about {company}." against article content.
+        Accepts if entailment >= 0.5, deletes the row otherwise.
+        Returns True if a row was processed, False if none available.
+        """
+        if not self._loaded:
+            return False
+
+        row = await get_next_unvalidated_company_result()
+        if not row:
+            return False
+
+        article_id = row["article_id"]
+        ticker = row["ticker"]
+        article_url = row["article_url"]
+
+        # Find company name from ticker_aliases
+        company_name = ticker
+        for name_candidate in self._ticker_aliases.get(ticker, []):
+            company_name = name_candidate
+            break
+
+        processing_status["company-validate"] = {
+            "article_id": article_id,
+            "article_url": article_url,
+            "started_at": time.time(),
+        }
+
+        logger.info("[validate] Checking %s for article %d", ticker, article_id)
+
+        content, _ = await fetch_article_content(article_url)
+        if not content:
+            logger.warning("[validate] Could not fetch content for article %d — rejecting", article_id)
+            await delete_company_result(article_id, ticker)
+            self._clear_model_status("company-validate")
+            return True
+
+        model = None
+        if model_name:
+            model = self._get_model(model_name)
+        if not model:
+            model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
+        if not model:
+            self._clear_model_status("company-validate")
+            return False
+
+        hypothesis = f"This article is about {company_name}."
+
+        loop = asyncio.get_event_loop()
+        try:
+            entail_scores, _ = await loop.run_in_executor(
+                self._executor,
+                model._nli_batch_full,
+                model.truncate(content, 6000),
+                [hypothesis],
+            )
+            entail = entail_scores[0]
+            if entail >= 0.5:
+                await mark_company_result_validated(article_id, ticker)
+                logger.info("[validate] ACCEPTED %s for article %d (entail=%.4f)", ticker, article_id, entail)
+            else:
+                await delete_company_result(article_id, ticker)
+                logger.info("[validate] REJECTED %s for article %d (entail=%.4f)", ticker, article_id, entail)
+        except Exception as e:
+            logger.error("[validate] Failed for %s article %d: %s", ticker, article_id, e)
+            await delete_company_result(article_id, ticker)
+
+        self._clear_model_status("company-validate")
         delay = _thermal_delay()
         if delay > 0:
             await asyncio.sleep(delay)
@@ -521,6 +618,8 @@ class EnsembleClassifier:
                             did_work = await self.score_next_impact()
                         elif task_type == "scan":
                             did_work = await self.scan_next_article()
+                        elif task_type == "validate":
+                            did_work = await self.validate_next_company_match(model_name=model)
                         elif task_type == "company_sentiment":
                             did_work = await self.classify_next_company_sentiment(model_name=model)
                     except Exception:
@@ -528,8 +627,11 @@ class EnsembleClassifier:
                     if did_work:
                         break
 
+                delay = _cpu_sleep()
                 if not did_work:
-                    await asyncio.sleep(IDLE_SLEEP)
+                    await asyncio.sleep(max(delay, IDLE_SLEEP_NONE))
+                elif delay > 0:
+                    await asyncio.sleep(delay)
         except asyncio.CancelledError:
             pass
 

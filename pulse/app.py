@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import subprocess
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,11 +15,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from pulse import database as db
 from pulse.classifier import ensemble, processing_status, start_workers, stop_workers
+from pulse.fetcher import fetch_all_feeds
+from pulse.scheduler import start_scheduler, stop_scheduler
 
 def _model_count() -> int:
     return max(len(ensemble.model_names), 1)
-from pulse.fetcher import fetch_all_feeds
-from pulse.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 

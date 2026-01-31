@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS articles (
     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     sent_to_sentinel BOOLEAN DEFAULT 0,
     sent_at TIMESTAMP,
-    impact REAL
+    impact REAL,
+    scanned_aliases JSON
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -38,18 +39,11 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS alias_scans (
-    id INTEGER PRIMARY KEY,
-    article_id INTEGER NOT NULL REFERENCES articles(id),
-    alias TEXT NOT NULL,
-    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(article_id, alias)
-);
-
 CREATE TABLE IF NOT EXISTS company_results (
     id INTEGER PRIMARY KEY,
     article_id INTEGER NOT NULL REFERENCES articles(id),
     ticker TEXT NOT NULL,
+    validated BOOLEAN,
     sentiment REAL,
     impact REAL,
     classified_at TIMESTAMP,
@@ -59,7 +53,6 @@ CREATE TABLE IF NOT EXISTS company_results (
 CREATE INDEX IF NOT EXISTS idx_results_article ON results(article_id);
 CREATE INDEX IF NOT EXISTS idx_results_model ON results(model);
 CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url);
-CREATE INDEX IF NOT EXISTS idx_alias_scans_article ON alias_scans(article_id);
 CREATE INDEX IF NOT EXISTS idx_company_results_article ON company_results(article_id);
 """
 
@@ -82,6 +75,16 @@ async def init_db():
         columns = {row[1] for row in await cursor.fetchall()}
         if "impact" not in columns:
             await db.execute("ALTER TABLE articles ADD COLUMN impact REAL")
+        # Migration: add scanned_aliases column if missing (existing DBs)
+        if "scanned_aliases" not in columns:
+            await db.execute("ALTER TABLE articles ADD COLUMN scanned_aliases JSON")
+        # Migration: drop legacy alias_scans table
+        await db.execute("DROP TABLE IF EXISTS alias_scans")
+        # Migration: add validated column if missing (existing DBs)
+        cursor = await db.execute("PRAGMA table_info(company_results)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "validated" not in columns:
+            await db.execute("ALTER TABLE company_results ADD COLUMN validated BOOLEAN")
         await db.commit()
     finally:
         await db.close()
@@ -370,7 +373,7 @@ async def get_stats(model_count: int = 1) -> dict:
 
         # Company scan stats
         company_scanned = (await (await db.execute(
-            "SELECT COUNT(DISTINCT article_id) FROM alias_scans"
+            "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL"
         )).fetchone())[0]
         company_mentions = (await (await db.execute(
             "SELECT COUNT(*) FROM company_results"
@@ -471,34 +474,48 @@ async def get_sentiment_detailed() -> list[dict]:
 
 # --- Alias Scans & Company Results ---
 
-async def save_alias_scan(article_id: int, alias: str):
-    """Record that an article has been scanned for a given alias."""
-    db = await get_db()
-    try:
-        await db.execute(
-            "INSERT OR IGNORE INTO alias_scans (article_id, alias) VALUES (?, ?)",
-            (article_id, alias),
-        )
-        await db.commit()
-    finally:
-        await db.close()
-
-
-async def get_unscanned_article_for_alias(alias: str) -> dict | None:
-    """Get an article not yet scanned for this alias, with impact >= 0.5, highest impact first."""
+async def get_article_missing_alias(alias: str) -> dict | None:
+    """Get an article that hasn't been scanned for this alias, with impact >= 0.5, highest impact first."""
     db = await get_db()
     try:
         cursor = await db.execute("""
             SELECT a.* FROM articles a
-            LEFT JOIN alias_scans s ON a.id = s.article_id AND s.alias = ?
-            WHERE s.id IS NULL
-              AND a.impact IS NOT NULL
-              AND a.impact >= 0.5
+            WHERE a.impact IS NOT NULL AND a.impact >= 0.5
+              AND (a.scanned_aliases IS NULL
+                   OR ? NOT IN (SELECT value FROM json_each(a.scanned_aliases)))
             ORDER BY a.impact DESC
             LIMIT 1
         """, (alias,))
         row = await cursor.fetchone()
         return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def get_scanned_aliases(article_id: int) -> list[str]:
+    """Return the list of aliases already scanned for this article."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT scanned_aliases FROM articles WHERE id = ?", (article_id,)
+        )
+        row = await cursor.fetchone()
+        if row and row["scanned_aliases"]:
+            return json.loads(row["scanned_aliases"])
+        return []
+    finally:
+        await db.close()
+
+
+async def save_scanned_aliases(article_id: int, aliases: list[str]):
+    """Store the full list of scanned aliases for an article."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE articles SET scanned_aliases = ? WHERE id = ?",
+            (json.dumps(aliases), article_id),
+        )
+        await db.commit()
     finally:
         await db.close()
 
@@ -516,15 +533,59 @@ async def save_company_mention(article_id: int, ticker: str):
         await db.close()
 
 
-async def get_next_unscored_company_result() -> dict | None:
-    """Get a company_results row where sentiment is NULL."""
+async def get_next_unvalidated_company_result() -> dict | None:
+    """Get a company_results row where validated is NULL (not yet checked by NLI)."""
     db = await get_db()
     try:
         cursor = await db.execute("""
             SELECT cr.*, a.url as article_url
             FROM company_results cr
             JOIN articles a ON cr.article_id = a.id
-            WHERE cr.sentiment IS NULL
+            WHERE cr.validated IS NULL
+            ORDER BY a.impact DESC
+            LIMIT 1
+        """)
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def mark_company_result_validated(article_id: int, ticker: str):
+    """Mark a company_results row as validated."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE company_results SET validated = 1 WHERE article_id = ? AND ticker = ?",
+            (article_id, ticker),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def delete_company_result(article_id: int, ticker: str):
+    """Delete a rejected company_results row."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM company_results WHERE article_id = ? AND ticker = ?",
+            (article_id, ticker),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_next_unscored_company_result() -> dict | None:
+    """Get a validated company_results row where sentiment is NULL."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("""
+            SELECT cr.*, a.url as article_url
+            FROM company_results cr
+            JOIN articles a ON cr.article_id = a.id
+            WHERE cr.validated = 1 AND cr.sentiment IS NULL
             ORDER BY a.impact DESC
             LIMIT 1
         """)
