@@ -179,14 +179,14 @@
 }
 .model-row:last-child { border-bottom: none; }
 
-/* Feeds collapsible */
-.feeds-section {
+/* Collapsible sections */
+.collapsible-section {
     margin-bottom: 1rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
 }
-.feeds-section summary {
+.collapsible-section summary {
     padding: 0.75rem 1.25rem;
     cursor: pointer;
     font-size: 0.8rem;
@@ -199,19 +199,43 @@
     align-items: center;
     gap: 0.5rem;
 }
-.feeds-section summary::-webkit-details-marker { display: none; }
-.feeds-section summary::before {
+.collapsible-section summary::-webkit-details-marker { display: none; }
+.collapsible-section summary::before {
     content: "\25B6";
     font-size: 0.6rem;
     transition: transform 0.15s;
 }
-.feeds-section[open] summary::before { transform: rotate(90deg); }
-.feeds-section .feeds-body {
+.collapsible-section[open] summary::before { transform: rotate(90deg); }
+.collapsible-body {
     padding: 0 1.25rem 1rem;
 }
-.feeds-section .form-row { margin-bottom: 0.75rem; }
-.feeds-section table { font-size: 0.85rem; }
-.feeds-section td, .feeds-section th { padding: 0.5rem 0.75rem; }
+.collapsible-section .form-row { margin-bottom: 0.75rem; }
+.collapsible-section table { font-size: 0.85rem; }
+.collapsible-section td, .collapsible-section th { padding: 0.5rem 0.75rem; }
+
+/* Settings */
+.settings-group { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.settings-group:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+.settings-group h4 { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
+.settings-field { margin-bottom: 0.5rem; }
+.settings-field label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.2rem; }
+.settings-field code { font-size: 0.7rem; }
+
+/* Fundus */
+.fundus-country { margin-bottom: 0.25rem; }
+.fundus-country-header {
+    cursor: pointer; display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; user-select: none;
+}
+.fundus-country-header:hover { background: rgba(99, 102, 241, 0.08); }
+.fundus-country-header .arrow { font-size: 0.6rem; transition: transform 0.15s; color: var(--text-dim); }
+.fundus-country-header .arrow.open { transform: rotate(90deg); }
+.fundus-country-header .count { font-size: 0.7rem; color: var(--text-dim); font-weight: 400; }
+.fundus-publishers-list { display: none; padding: 0.2rem 0 0.4rem 1.25rem; }
+.fundus-publishers-list.open { display: block; }
+.fundus-pub-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0; font-size: 0.8rem; }
+.fundus-pub-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+.fundus-pub-row .domain { color: var(--text-dim); font-size: 0.7rem; }
 </style>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">

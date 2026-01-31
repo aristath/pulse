@@ -143,7 +143,6 @@
         <a href="/" class="logo">Pulse</a>
         <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Dashboard</a>
         <a href="/charts" {% if request.url.path == "/charts" %}class="active"{% endif %}>Charts</a>
-        <a href="/settings" {% if request.url.path == "/settings" %}class="active"{% endif %}>Settings</a>
         <div class="nav-stats" hx-get="/partials/system-stats" hx-trigger="load, every 5s" hx-swap="innerHTML">
         </div>
     </nav>

@@ -81,6 +81,11 @@ async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
     avg_times = get_worker_avg_times()
     feeds = await db.get_feeds()
+    sentinel_url = await db.get_setting("sentinel_url") or ""
+    prompt_impact = await db.get_setting("prompt_impact") or ""
+    prompt_country = await db.get_setting("prompt_country") or ""
+    prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
+    prompt_company = await db.get_setting("prompt_company") or ""
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -89,23 +94,6 @@ async def dashboard(request: Request):
             "processing": processing_status,
             "avg_times": avg_times,
             "feeds": feeds,
-        },
-    )
-
-
-
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    sentinel_url = await db.get_setting("sentinel_url") or ""
-    prompt_impact = await db.get_setting("prompt_impact") or ""
-    prompt_country = await db.get_setting("prompt_country") or ""
-    prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
-    prompt_company = await db.get_setting("prompt_company") or ""
-    return templates.TemplateResponse(
-        "settings.html",
-        {
-            "request": request,
             "sentinel_url": sentinel_url,
             "prompt_impact": prompt_impact,
             "prompt_country": prompt_country,
@@ -113,7 +101,6 @@ async def settings_page(request: Request):
             "prompt_company": prompt_company,
         },
     )
-
 
 
 @app.get("/charts", response_class=HTMLResponse)
@@ -365,6 +352,11 @@ async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
     avg_times = get_worker_avg_times()
     feeds = await db.get_feeds()
+    sentinel_url = await db.get_setting("sentinel_url") or ""
+    prompt_impact = await db.get_setting("prompt_impact") or ""
+    prompt_country = await db.get_setting("prompt_country") or ""
+    prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
+    prompt_company = await db.get_setting("prompt_company") or ""
     return templates.TemplateResponse(
         "partials/stats.html",
         {
@@ -373,6 +365,11 @@ async def partial_stats(request: Request):
             "processing": processing_status,
             "avg_times": avg_times,
             "feeds": feeds,
+            "sentinel_url": sentinel_url,
+            "prompt_impact": prompt_impact,
+            "prompt_country": prompt_country,
+            "prompt_sentiment": prompt_sentiment,
+            "prompt_company": prompt_company,
         },
     )
 

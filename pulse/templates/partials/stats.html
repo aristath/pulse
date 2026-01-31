@@ -59,9 +59,9 @@
         </div>
 
         <!-- Feeds (collapsible, preserved across HTMX swaps) -->
-        <details id="feeds-section" class="feeds-section" hx-preserve="true">
+        <details id="feeds-section" class="collapsible-section" hx-preserve="true">
             <summary>Feeds ({{ feeds|length }})</summary>
-            <div class="feeds-body">
+            <div class="collapsible-body">
                 <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
                       hx-on::after-request="this.reset(); htmx.ajax('GET', '/partials/feeds', '#feeds-list')">
                     <div class="form-row">
@@ -72,6 +72,63 @@
                 </form>
                 <div id="feeds-list">
                     {% include "partials/feeds_list.html" %}
+                </div>
+            </div>
+        </details>
+
+        <!-- Settings (collapsible, preserved across HTMX swaps) -->
+        <details id="settings-section" class="collapsible-section" hx-preserve="true">
+            <summary>Settings</summary>
+            <div class="collapsible-body">
+                <div class="settings-group">
+                    <h4>Sentinel Connection</h4>
+                    <form hx-put="/api/settings/sentinel_url" hx-swap="none"
+                          hx-on::after-request="document.getElementById('save-status').textContent = 'Saved'; setTimeout(() => document.getElementById('save-status').textContent = '', 2000)">
+                        <div class="form-row">
+                            <input type="url" name="url" value="{{ sentinel_url }}" placeholder="http://192.168.1.x:8000">
+                            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                            <span id="save-status" style="color: var(--green); font-size: 0.8rem;"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="settings-group">
+                    <h4>NLI Prompts</h4>
+                    <form hx-put="/api/settings/prompts" hx-swap="none"
+                          hx-on::after-request="document.getElementById('prompt-status').textContent = 'Saved'; setTimeout(() => document.getElementById('prompt-status').textContent = '', 2000)">
+                        <div class="settings-field">
+                            <label>Impact / Relevance</label>
+                            <input type="text" name="prompt_impact" value="{{ prompt_impact }}" placeholder="This text is about business or economics.">
+                        </div>
+                        <div class="settings-field">
+                            <label>Country Relevance <code>{country}</code></label>
+                            <input type="text" name="prompt_country" value="{{ prompt_country }}" placeholder="This article is about {country}.">
+                        </div>
+                        <div class="settings-field">
+                            <label>Sector Sentiment <code>{sector} {country}</code></label>
+                            <input type="text" name="prompt_sentiment" value="{{ prompt_sentiment }}" placeholder="This is good news for the {sector} sector in {country}.">
+                        </div>
+                        <div class="settings-field">
+                            <label>Company Sentiment <code>{company}</code></label>
+                            <input type="text" name="prompt_company" value="{{ prompt_company }}" placeholder="This is good news for {company}.">
+                        </div>
+                        <div class="form-row">
+                            <button type="submit" class="btn btn-primary btn-sm">Save Prompts</button>
+                            <span id="prompt-status" style="color: var(--green); font-size: 0.8rem;"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Fundus Publishers</h4>
+                    <div id="fundus-publishers">
+                        <p style="color: var(--text-dim); font-size: 0.8rem;">Loading publishers...</p>
+                    </div>
+                    <div class="form-row" style="margin-top: 0.5rem;">
+                        <button class="btn btn-primary btn-sm" onclick="saveFundusPublishers()">Save</button>
+                        <button class="btn btn-sm" style="background: var(--green); color: white;" onclick="triggerFundusCrawl(this)">Crawl Now</button>
+                        <span id="fundus-status" style="color: var(--green); font-size: 0.8rem;"></span>
+                    </div>
                 </div>
             </div>
         </details>
@@ -141,7 +198,7 @@
     </div>
 </div>
 
-<!-- Elapsed timer updater -->
+<!-- Elapsed timer updater + settings JS -->
 <script>
 (function() {
     function updateTimers() {
@@ -157,5 +214,87 @@
     }
     updateTimers();
     setInterval(updateTimers, 1000);
+
+    // Load fundus publishers (only if container exists and empty)
+    var fp = document.getElementById('fundus-publishers');
+    if (fp && !fp.dataset.loaded) {
+        fp.dataset.loaded = '1';
+        fetch('/api/fundus/publishers')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var countries = Object.keys(data).sort();
+                if (!countries.length) {
+                    fp.innerHTML = '<p style="color:var(--text-dim);font-size:0.8rem">No publishers available.</p>';
+                    return;
+                }
+                var html = '';
+                for (var i = 0; i < countries.length; i++) {
+                    var country = countries[i];
+                    var pubs = data[country];
+                    var enabled = pubs.filter(function(p) { return p.enabled; }).length;
+                    var countLabel = enabled > 0 ? enabled + '/' + pubs.length + ' enabled' : '' + pubs.length;
+                    html += '<div class="fundus-country">';
+                    html += '<div class="fundus-country-header" onclick="toggleCountry(this)">';
+                    html += '<span class="arrow">&#9654;</span>';
+                    html += '<span>' + country.toUpperCase() + '</span>';
+                    html += '<span class="count">(' + countLabel + ')</span>';
+                    html += '</div>';
+                    html += '<div class="fundus-publishers-list">';
+                    for (var j = 0; j < pubs.length; j++) {
+                        var pub = pubs[j];
+                        html += '<label class="fundus-pub-row">';
+                        html += '<input type="checkbox" value="' + pub.id + '"' + (pub.enabled ? ' checked' : '') + '>';
+                        html += '<span>' + pub.name + '</span>';
+                        html += '<span class="domain">' + pub.domain + '</span>';
+                        html += '</label>';
+                    }
+                    html += '</div></div>';
+                }
+                fp.innerHTML = html;
+            })
+            .catch(function() {
+                fp.innerHTML = '<p style="color:var(--red);font-size:0.8rem">Failed to load publishers.</p>';
+            });
+    }
 })();
+
+function toggleCountry(header) {
+    var arrow = header.querySelector('.arrow');
+    var list = header.nextElementSibling;
+    arrow.classList.toggle('open');
+    list.classList.toggle('open');
+}
+
+function saveFundusPublishers() {
+    var checks = document.querySelectorAll('#fundus-publishers input[type="checkbox"]:checked');
+    var ids = Array.from(checks).map(function(c) { return c.value; });
+    fetch('/api/fundus/publishers', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({publishers: ids})
+    }).then(function(r) { return r.json(); }).then(function() {
+        var el = document.getElementById('fundus-status');
+        el.textContent = 'Saved';
+        setTimeout(function() { el.textContent = ''; }, 2000);
+    });
+}
+
+function triggerFundusCrawl(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Crawling...';
+    fetch('/api/fundus/crawl', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var el = document.getElementById('fundus-status');
+            el.textContent = 'Done: ' + data.added + ' new';
+            setTimeout(function() { el.textContent = ''; }, 5000);
+        })
+        .catch(function() {
+            document.getElementById('fundus-status').textContent = 'Failed';
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = 'Crawl Now';
+        });
+}
 </script>
