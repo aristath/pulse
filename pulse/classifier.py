@@ -61,10 +61,10 @@ def _cpu_sleep() -> float:
 # Each worker pulls tasks in priority order.
 # Capabilities: (task_type, model_name_or_None)
 WORKER_CONFIGS = [
+    ("impact", [("impact", None)]),
     (
         "modernbert-nli",
         [
-            ("impact", None),
             ("classify", "modernbert-nli"),
             ("validate", "modernbert-nli"),
             ("company_sentiment", "modernbert-nli"),
@@ -123,7 +123,7 @@ class EnsembleClassifier:
         self._impact_scorer = ImpactScorer()
         self._company_scanner = CompanyScanner()
         self._ticker_aliases: dict[str, list[str]] = {}
-        self._executor = ThreadPoolExecutor(max_workers=4)
+        self._executor = ThreadPoolExecutor(max_workers=5)
         self._loaded = False
         self._countries: list[str] = []
         self._sectors: dict[str, list[str]] = {}
