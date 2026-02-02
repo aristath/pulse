@@ -32,11 +32,11 @@ class DeBERTaNLI(BaseModel):
 
     def load(self):
         self._device = get_torch_device()
-        backend = "OpenVINO GPU" if HAS_OPENVINO else str(self._device)
-        logger.info("Loading %s on %s...", MODEL_ID, backend)
+        logger.info("Loading %s ...", MODEL_ID)
         self._tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
         self._model = load_sequence_classification_model(MODEL_ID, device="GPU")
-        logger.info("%s loaded on %s", self.name, backend)
+        kind = "OpenVINO" if hasattr(self._model, "request") else "PyTorch"
+        logger.info("%s loaded (%s)", self.name, kind)
 
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SECTOR = "This is relevant to the {sector} sector."

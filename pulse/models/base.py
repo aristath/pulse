@@ -62,6 +62,19 @@ def load_sequence_classification_model(model_id: str, device: str = "CPU", openv
             logger.info("Saved OpenVINO IR to %s, compiled on %s", cache_dir, device)
             return model
         except Exception:
+            pass
+        # GPU may reject dynamic shapes; retry with static batch=1
+        if device.upper() == "GPU":
+            try:
+                model = OVModelForSequenceClassification.from_pretrained(cache_dir, compile=False)
+                model.reshape(1, 512)
+                model.to(device.lower())
+                model.compile()
+                logger.info("Loaded OpenVINO model on %s (static shapes) from cache: %s", device, cache_dir)
+                return model
+            except Exception as exc:
+                logger.warning("OpenVINO failed for %s on %s: %s, falling back to PyTorch", model_id, device, exc)
+        else:
             logger.warning("OpenVINO failed for %s on %s, falling back to PyTorch", model_id, device)
 
     from transformers import AutoModelForSequenceClassification
