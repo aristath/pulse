@@ -137,7 +137,8 @@ class DeBERTaNLI(BaseModel):
         scores = []
         for hyp in hypotheses:
             inputs = self._tokenizer(
-                premise, hyp, return_tensors="pt", truncation=True, max_length=MAX_LENGTH,
+                premise, hyp, return_tensors="pt", truncation=True,
+                padding="max_length", max_length=MAX_LENGTH,
             )
             probs = torch.softmax(self._infer(inputs), dim=-1)
             score = probs[0, 0].item()
@@ -151,7 +152,8 @@ class DeBERTaNLI(BaseModel):
         entail, contra = [], []
         for hyp in hypotheses:
             inputs = self._tokenizer(
-                premise, hyp, return_tensors="pt", truncation=True, max_length=MAX_LENGTH,
+                premise, hyp, return_tensors="pt", truncation=True,
+                padding="max_length", max_length=MAX_LENGTH,
             )
             probs = torch.softmax(self._infer(inputs), dim=-1)
             e = probs[0, 0].item()
