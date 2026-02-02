@@ -40,7 +40,8 @@ class DeBERTaNLI(BaseModel):
 
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SECTOR = "This is relevant to the {sector} sector."
-    DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
+    DEFAULT_SENTIMENT_POS = "This is positive for the {sector} sector in {country}."
+    DEFAULT_SENTIMENT_NEG = "This is negative for the {sector} sector in {country}."
 
     def classify(
         self,
@@ -57,7 +58,6 @@ class DeBERTaNLI(BaseModel):
         text = self.truncate(text, CHUNK_SIZE)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
         sector_tpl = prompt_sector or self.DEFAULT_SECTOR
-        sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
 
         # Pass 1: country relevance
         country_hypotheses = [country_tpl.format(country=c) for c in countries]
@@ -78,23 +78,26 @@ class DeBERTaNLI(BaseModel):
         if not relevant_sectors:
             return {}
 
-        # Pass 3: sentiment for relevant sectors
+        # Pass 3: sentiment via separate positive/negative hypotheses
+        # (2-class NLI: entailment vs not_entailment — need two hypotheses
+        #  to distinguish positive from negative sentiment)
+        pos_tpl = self.DEFAULT_SENTIMENT_POS
+        neg_tpl = self.DEFAULT_SENTIMENT_NEG
         signals = {}
         for country in relevant:
             country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
             if not country_sectors:
                 continue
 
-            hypotheses = [
-                sentiment_tpl.format(sector=sector, country=country)
-                for sector in country_sectors
-            ]
-            entail_scores, contra_scores = self._nli_batch_full(text, hypotheses)
+            pos_hyps = [pos_tpl.format(sector=s, country=country) for s in country_sectors]
+            neg_hyps = [neg_tpl.format(sector=s, country=country) for s in country_sectors]
+            pos_scores = self._nli_batch(text, pos_hyps)
+            neg_scores = self._nli_batch(text, neg_hyps)
 
             country_signals = {}
-            for sector, ent, con in zip(country_sectors, entail_scores, contra_scores):
-                if ent >= SENTIMENT_THRESHOLD or con >= SENTIMENT_THRESHOLD:
-                    sentiment = round(ent - con, 4)
+            for sector, pos, neg in zip(country_sectors, pos_scores, neg_scores):
+                if pos >= SENTIMENT_THRESHOLD or neg >= SENTIMENT_THRESHOLD:
+                    sentiment = round(pos - neg, 4)
                     sentiment = max(-1.0, min(1.0, sentiment))
                     country_signals[sector] = sentiment
 
