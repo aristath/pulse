@@ -648,6 +648,91 @@ async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, de
     return result
 
 
+async def get_sentiment_bar_articles(
+    bar_type: str, label: str, threshold: float, days: int = 90, decay: bool = True
+) -> list[dict]:
+    """Return individual articles contributing to a sentiment bar, ordered by contribution.
+
+    Each entry has: title, url, sentiment, weight, contribution (sentiment * weight).
+    """
+    now = time.time()
+    cutoff = now - days * 86400
+    db = await get_db()
+    try:
+        if bar_type == "country":
+            cursor = await db.execute(
+                """
+                SELECT r.article_id, a.title, a.url,
+                       AVG(CAST(sector.value AS REAL)) AS sentiment,
+                       a.published_at
+                FROM results r
+                JOIN articles a ON r.article_id = a.id,
+                     json_each(r.signals) AS country,
+                     json_each(country.value) AS sector
+                WHERE a.published_at >= ?
+                  AND a.impact IS NOT NULL AND a.impact >= ?
+                  AND r.signals != '{}'
+                  AND country.key = ?
+                GROUP BY r.article_id
+                """,
+                (cutoff, threshold, label),
+            )
+        elif bar_type == "industry":
+            cursor = await db.execute(
+                """
+                SELECT r.article_id, a.title, a.url,
+                       AVG(CAST(sector.value AS REAL)) AS sentiment,
+                       a.published_at
+                FROM results r
+                JOIN articles a ON r.article_id = a.id,
+                     json_each(r.signals) AS country,
+                     json_each(country.value) AS sector
+                WHERE a.published_at >= ?
+                  AND a.impact IS NOT NULL AND a.impact >= ?
+                  AND r.signals != '{}'
+                  AND sector.key = ?
+                GROUP BY r.article_id
+                """,
+                (cutoff, threshold, label),
+            )
+        elif bar_type == "company":
+            cursor = await db.execute(
+                """
+                SELECT cr.article_id, a.title, a.url,
+                       cr.sentiment, a.published_at
+                FROM company_results cr
+                JOIN articles a ON cr.article_id = a.id
+                WHERE a.published_at >= ?
+                  AND cr.sentiment IS NOT NULL
+                  AND cr.ticker = ?
+                """,
+                (cutoff, label),
+            )
+        else:
+            return []
+
+        rows = await cursor.fetchall()
+    finally:
+        await db.close()
+
+    result = []
+    for row in rows:
+        pub = row["published_at"]
+        if pub is None:
+            continue
+        age_days = (now - float(pub)) / 86400
+        weight = math.exp(-0.1 * age_days) if decay else 1.0
+        result.append({
+            "title": row["title"] or row["url"],
+            "url": row["url"],
+            "sentiment": row["sentiment"],
+            "weight": round(weight, 4),
+            "contribution": abs(row["sentiment"] * weight),
+        })
+    result.sort(key=lambda x: x["contribution"], reverse=True)
+    return result
+
+
 # --- Settings ---
 
 # --- Alias Scans & Company Results ---

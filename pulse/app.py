@@ -215,6 +215,15 @@ async def api_charts_sentiment_bars(type: str = "country", days: int = 90, decay
     return await db.get_sentiment_bars(type, threshold, days=days, decay=decay)
 
 
+@app.get("/api/charts/sentiment-bar-articles")
+async def api_charts_sentiment_bar_articles(type: str, label: str, days: int = 90, decay: bool = True):
+    if type not in ("country", "industry", "company"):
+        raise HTTPException(400, "type must be 'country', 'industry', or 'company'")
+    days = max(1, min(days, 3650))
+    threshold = float(await db.get_setting("classify_threshold") or "0.5")
+    return await db.get_sentiment_bar_articles(type, label, threshold, days=days, decay=decay)
+
+
 @app.get("/api/stats")
 async def api_stats():
     return await db.get_stats(_model_count())

@@ -80,6 +80,17 @@
             <div id="chart-company-bars" class="sentiment-bars"></div>
         </div>
 
+        <!-- Article detail modal -->
+        <div id="article-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <span id="modal-title"></span>
+                    <button onclick="document.getElementById('article-modal').style.display='none'">&times;</button>
+                </div>
+                <div id="modal-body"></div>
+            </div>
+        </div>
+
         <!-- Feeds (collapsible, preserved across HTMX swaps) -->
         <details id="feeds-section" class="collapsible-section" hx-preserve="true">
             <summary>Feeds ({{ feeds|length }})</summary>
@@ -235,25 +246,28 @@
     if (!window._chartsInited) {
         window._chartsInited = true;
 
-        function renderBarChart(container, data) {
+        function barRowHtml(d, barType) {
+            var v = d.avg_sentiment;
+            var pct = Math.abs(v) * 50;
+            var color = v >= 0 ? '#22c55e' : '#ef4444';
+            var left = v >= 0 ? '50%' : (50 - pct) + '%';
+            return '<div class="sbar-row" data-type="' + barType + '" data-label="' + d.label.replace(/"/g, '&quot;') + '"'
+                + ' title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
+                + '<span class="sbar-label">' + d.label + '</span>'
+                + '<div class="sbar-track"><div class="sbar-zero"></div>'
+                + '<div class="sbar-fill" style="left:' + left + ';width:' + pct + '%;background:' + color + '"></div></div>'
+                + '<span class="sbar-val">' + v.toFixed(3) + '</span>'
+                + '</div>';
+        }
+
+        function renderBarChart(container, data, barType) {
             var html = '';
-            for (var i = 0; i < data.length; i++) {
-                var d = data[i];
-                var v = d.avg_sentiment;
-                var pct = Math.abs(v) * 50;
-                var color = v >= 0 ? '#22c55e' : '#ef4444';
-                var left = v >= 0 ? '50%' : (50 - pct) + '%';
-                html += '<div class="sbar-row" title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
-                    + '<span class="sbar-label">' + d.label + '</span>'
-                    + '<div class="sbar-track"><div class="sbar-zero"></div>'
-                    + '<div class="sbar-fill" style="left:' + left + ';width:' + pct + '%;background:' + color + '"></div></div>'
-                    + '<span class="sbar-val">' + v.toFixed(3) + '</span>'
-                    + '</div>';
-            }
+            for (var i = 0; i < data.length; i++) html += barRowHtml(data[i], barType);
             container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
 
         function renderGroupedCharts(container, data, groupKey, labelKey) {
+            var barType = labelKey === 'industry' ? 'industry' : 'country';
             var groups = {};
             for (var i = 0; i < data.length; i++) {
                 var d = data[i];
@@ -267,22 +281,47 @@
                 var items = groups[keys[k]];
                 items.sort(function(a, b) { return b.avg_sentiment - a.avg_sentiment; });
                 html += '<div class="sbar-group-label">' + keys[k] + '</div>';
-                for (var j = 0; j < items.length; j++) {
-                    var d = items[j];
-                    var v = d.avg_sentiment;
-                    var pct = Math.abs(v) * 50;
-                    var color = v >= 0 ? '#22c55e' : '#ef4444';
-                    var left = v >= 0 ? '50%' : (50 - pct) + '%';
-                    html += '<div class="sbar-row" title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
-                        + '<span class="sbar-label">' + d.label + '</span>'
-                        + '<div class="sbar-track"><div class="sbar-zero"></div>'
-                        + '<div class="sbar-fill" style="left:' + left + ';width:' + pct + '%;background:' + color + '"></div></div>'
-                        + '<span class="sbar-val">' + v.toFixed(3) + '</span>'
-                        + '</div>';
-                }
+                for (var j = 0; j < items.length; j++) html += barRowHtml(items[j], barType);
             }
             container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
+
+        function openArticleModal(barType, label) {
+            var p = chartParams();
+            var modal = document.getElementById('article-modal');
+            document.getElementById('modal-title').textContent = label + ' (' + barType + ')';
+            document.getElementById('modal-body').innerHTML = '<span style="color:#8888a0">Loading...</span>';
+            modal.style.display = 'flex';
+            fetch('/api/charts/sentiment-bar-articles?type=' + encodeURIComponent(barType) + '&label=' + encodeURIComponent(label) + p)
+                .then(function(r) { return r.json(); })
+                .then(function(articles) {
+                    if (!articles.length) {
+                        document.getElementById('modal-body').innerHTML = '<span style="color:#8888a0">No articles found.</span>';
+                        return;
+                    }
+                    var html = '';
+                    for (var i = 0; i < articles.length; i++) {
+                        var a = articles[i];
+                        var sColor = a.sentiment >= 0 ? '#22c55e' : '#ef4444';
+                        html += '<div class="modal-article">'
+                            + '<a href="' + a.url + '" target="_blank" rel="noopener">' + (a.title || a.url) + '</a>'
+                            + '<span class="modal-meta">'
+                            + '<span style="color:' + sColor + '">' + a.sentiment.toFixed(3) + '</span>'
+                            + ' &middot; wt ' + a.weight
+                            + '</span></div>';
+                    }
+                    document.getElementById('modal-body').innerHTML = html;
+                })
+                .catch(function() {
+                    document.getElementById('modal-body').innerHTML = '<span style="color:#ef4444">Failed to load.</span>';
+                });
+        }
+
+        document.getElementById('charts-card').addEventListener('click', function(e) {
+            var row = e.target.closest('.sbar-row');
+            if (!row) return;
+            openArticleModal(row.dataset.type, row.dataset.label);
+        });
 
         function chartParams() {
             var days = document.getElementById('chart-days').value || '90';
@@ -301,9 +340,9 @@
                 fetch('/api/charts/sentiment-bars?type=company' + p).then(function(r) { return r.json(); }),
                 fetch('/api/charts/sentiment-bars?type=detailed' + p).then(function(r) { return r.json(); })
             ]).then(function(results) {
-                renderBarChart(document.getElementById('chart-country-bars'), results[0]);
-                renderBarChart(document.getElementById('chart-industry-bars'), results[1]);
-                renderBarChart(document.getElementById('chart-company-bars'), results[2]);
+                renderBarChart(document.getElementById('chart-country-bars'), results[0], 'country');
+                renderBarChart(document.getElementById('chart-industry-bars'), results[1], 'industry');
+                renderBarChart(document.getElementById('chart-company-bars'), results[2], 'company');
                 renderGroupedCharts(document.getElementById('chart-industries-by-country'), results[3], 'country', 'industry');
                 renderGroupedCharts(document.getElementById('chart-countries-by-industry'), results[3], 'industry', 'country');
             }).catch(function(e) { console.error('Bar chart refresh failed:', e); });

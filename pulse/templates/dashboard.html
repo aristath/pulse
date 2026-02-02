@@ -264,6 +264,17 @@
 .sbar-group-label:first-child { margin-top: 0; }
 .chart-controls { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; font-size: 0.8rem; color: #8888a0; }
 .chart-controls input[type="number"] { background: var(--surface); border: 1px solid var(--border); color: #e0e0e8; border-radius: 4px; padding: 2px 6px; font-size: 0.8rem; }
+.sbar-row { cursor: pointer; } .sbar-row:hover { background: rgba(255,255,255,0.03); }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 600px; max-height: 80vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 0.9rem; }
+.modal-header button { background: none; border: none; color: #8888a0; font-size: 1.2rem; cursor: pointer; }
+#modal-body { padding: 0.75rem 1rem; overflow-y: auto; }
+.modal-article { padding: 0.4rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.modal-article:last-child { border-bottom: none; }
+.modal-article a { color: #6366f1; text-decoration: none; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-article a:hover { text-decoration: underline; }
+.modal-meta { flex-shrink: 0; font-size: 0.7rem; color: #8888a0; white-space: nowrap; }
 </style>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
