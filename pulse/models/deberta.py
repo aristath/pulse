@@ -1,36 +1,45 @@
 import logging
+import math
+import threading
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 
-from pulse.models.base import BaseModel, get_torch_device, is_latin_text
+from pulse.models.base import (
+    BaseModel, get_torch_device, is_latin_text,
+    HAS_OPENVINO, load_sequence_classification_model,
+)
 
 logger = logging.getLogger(__name__)
 
+MODEL_ID = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
 RELEVANCE_THRESHOLD = 0.5
 SENTIMENT_THRESHOLD = 0.3
+MAX_LENGTH = 512
 CHUNK_SIZE = 400  # words per chunk (DeBERTa max 512 tokens)
 
 
 class DeBERTaNLI(BaseModel):
-    """DeBERTa-v3-large-mnli: Highest accuracy NLI, uses chunking for long texts."""
+    """DeBERTa-v3-base-zeroshot-v2.0: NLI classification on OpenVINO GPU."""
 
     name = "deberta-nli"
 
-    def __init__(self):
+    def __init__(self, name: str = "deberta-nli"):
+        self.name = name
         self._tokenizer = None
         self._model = None
+        self._device = None
+        self._lock = threading.Lock()
 
     def load(self):
-        model_id = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
         self._device = get_torch_device()
-        logger.info("Loading %s on %s...", model_id, self._device)
-        self._tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self._model = AutoModelForSequenceClassification.from_pretrained(model_id)
-        self._model.to(self._device)
-        self._model.eval()
-        logger.info("%s loaded on %s", self.name, self._device)
+        backend = "OpenVINO GPU" if HAS_OPENVINO else str(self._device)
+        logger.info("Loading %s on %s...", MODEL_ID, backend)
+        self._tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+        self._model = load_sequence_classification_model(MODEL_ID, device="GPU")
+        logger.info("%s loaded on %s", self.name, backend)
 
     DEFAULT_COUNTRY = "This article is about {country}."
+    DEFAULT_SECTOR = "This is relevant to the {sector} sector."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
 
     def classify(
@@ -45,30 +54,34 @@ class DeBERTaNLI(BaseModel):
         if not is_latin_text(text):
             return {}
 
-        chunks = self._chunk_text(text)
+        text = self.truncate(text, CHUNK_SIZE)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
+        sector_tpl = prompt_sector or self.DEFAULT_SECTOR
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
 
-        # Pass 1: batch country relevance per chunk, take max across chunks
+        # Pass 1: country relevance
         country_hypotheses = [country_tpl.format(country=c) for c in countries]
-        best_scores = [0.0] * len(countries)
-        for chunk in chunks:
-            scores = self._nli_batch(chunk, country_hypotheses)
-            best_scores = [max(b, s) for b, s in zip(best_scores, scores)]
-
-        relevant = [
-            c for c, s in zip(countries, best_scores) if s >= RELEVANCE_THRESHOLD
-        ]
+        scores = self._nli_batch(text, country_hypotheses)
+        relevant = [c for c, s in zip(countries, scores) if s >= RELEVANCE_THRESHOLD]
         if not relevant:
             return {}
 
-        # Use only the first chunk for pass 2 (speed vs accuracy tradeoff)
-        best_chunk = chunks[0]
+        # Pass 2: sector relevance
+        all_sectors = set()
+        for country in relevant:
+            all_sectors.update(sectors.get(country, sectors.get("global", [])))
+        all_sectors = sorted(all_sectors)
 
-        # Pass 2: batch sector sentiment for each relevant country
+        sector_hypotheses = [sector_tpl.format(sector=s) for s in all_sectors]
+        sector_scores = self._nli_batch(text, sector_hypotheses)
+        relevant_sectors = {s for s, sc in zip(all_sectors, sector_scores) if sc >= RELEVANCE_THRESHOLD}
+        if not relevant_sectors:
+            return {}
+
+        # Pass 3: sentiment for relevant sectors
         signals = {}
         for country in relevant:
-            country_sectors = sectors.get(country, sectors.get("global", []))
+            country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
             if not country_sectors:
                 continue
 
@@ -76,7 +89,7 @@ class DeBERTaNLI(BaseModel):
                 sentiment_tpl.format(sector=sector, country=country)
                 for sector in country_sectors
             ]
-            entail_scores, contra_scores = self._nli_batch_full(best_chunk, hypotheses)
+            entail_scores, contra_scores = self._nli_batch_full(text, hypotheses)
 
             country_signals = {}
             for sector, ent, con in zip(country_sectors, entail_scores, contra_scores):
@@ -90,46 +103,56 @@ class DeBERTaNLI(BaseModel):
 
         return signals
 
-    def _chunk_text(self, text: str) -> list[str]:
-        """Split text into chunks that fit DeBERTa's 512-token context."""
-        words = text.split()
-        if len(words) <= CHUNK_SIZE:
-            return [text]
-        chunks = []
-        for i in range(0, len(words), CHUNK_SIZE):
-            chunks.append(" ".join(words[i : i + CHUNK_SIZE]))
-        return chunks
+    def validate_company(self, text: str, company_name: str) -> float:
+        """Score how relevant the article is to the given company."""
+        text = self.truncate(text, CHUNK_SIZE)
+        scores = self._nli_batch(text, [f"This article is about {company_name}"])
+        return scores[0]
+
+    def score_company_sentiment(
+        self, text: str, company_name: str, prompt: str = "",
+    ) -> tuple[float, float]:
+        """Return (sentiment, impact) for the company."""
+        text = self.truncate(text, CHUNK_SIZE)
+        pos = self._nli_batch(text, [f"positive for {company_name}"])[0]
+        neg = self._nli_batch(text, [f"negative for {company_name}"])[0]
+        sentiment = max(-1.0, min(1.0, round(pos - neg, 4)))
+        impact = round(max(pos, neg), 4)
+        return sentiment, impact
+
+    def _infer(self, inputs):
+        """Lock-protected forward pass."""
+        with self._lock:
+            if not HAS_OPENVINO:
+                inputs = inputs.to(self._device)
+                with torch.no_grad():
+                    return self._model(**inputs).logits
+            return self._model(**inputs).logits
 
     def _nli_batch(self, premise: str, hypotheses: list[str]) -> list[float]:
-        """Batch NLI — return entailment scores."""
-        inputs = self._tokenizer(
-            [premise] * len(hypotheses),
-            hypotheses,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512,
-        ).to(self._device)
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
-        probs = torch.softmax(logits, dim=-1)
-        # v2.0: 2-class (0=entailment, 1=not_entailment)
-        return probs[:, 0].tolist()
+        """Return entailment scores, one hypothesis at a time."""
+        scores = []
+        for hyp in hypotheses:
+            inputs = self._tokenizer(
+                premise, hyp, return_tensors="pt", truncation=True, max_length=MAX_LENGTH,
+            )
+            probs = torch.softmax(self._infer(inputs), dim=-1)
+            score = probs[0, 0].item()
+            scores.append(0.0 if math.isnan(score) else score)
+        return scores
 
     def _nli_batch_full(
         self, premise: str, hypotheses: list[str]
     ) -> tuple[list[float], list[float]]:
-        """Batch NLI — return (entailment_scores, contradiction_scores)."""
-        inputs = self._tokenizer(
-            [premise] * len(hypotheses),
-            hypotheses,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512,
-        ).to(self._device)
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
-        probs = torch.softmax(logits, dim=-1)
-        # v2.0: 2-class (0=entailment, 1=not_entailment)
-        return probs[:, 0].tolist(), probs[:, 1].tolist()
+        """Return (entailment_scores, contradiction_scores), one hypothesis at a time."""
+        entail, contra = [], []
+        for hyp in hypotheses:
+            inputs = self._tokenizer(
+                premise, hyp, return_tensors="pt", truncation=True, max_length=MAX_LENGTH,
+            )
+            probs = torch.softmax(self._infer(inputs), dim=-1)
+            e = probs[0, 0].item()
+            c = probs[0, 1].item()
+            entail.append(0.0 if math.isnan(e) else e)
+            contra.append(0.0 if math.isnan(c) else c)
+        return entail, contra

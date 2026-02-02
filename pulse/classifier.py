@@ -8,6 +8,7 @@ import httpx
 import psutil
 
 from pulse.models.base import BaseModel
+from pulse.models.deberta import DeBERTaNLI
 from pulse.models.gliclass import GLiClassNLI
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
@@ -72,6 +73,14 @@ WORKER_CONFIGS = [
             ("company_sentiment", "gliclass-aux"),
         ],
     ),
+    ("deberta", [("classify", "deberta")]),
+    (
+        "deberta-aux",
+        [
+            ("validate", "deberta-aux"),
+            ("company_sentiment", "deberta-aux"),
+        ],
+    ),
     ("company-scanner", [("scan", None)]),
 ]
 
@@ -84,6 +93,9 @@ WORKER_LABELS = {
     "classify:gliclass": "Classify (GLiClass)",
     "validate:gliclass-aux": "Validate (GLiClass)",
     "company_sentiment:gliclass-aux": "Sentiment (GLiClass)",
+    "classify:deberta": "Classify (DeBERTa)",
+    "validate:deberta-aux": "Validate (DeBERTa)",
+    "company_sentiment:deberta-aux": "Sentiment (DeBERTa)",
     "company-scanner": "Company Scanner (GLiNER)",
 }
 
@@ -123,6 +135,8 @@ class EnsembleClassifier:
         self._models: list[BaseModel] = [
             GLiClassNLI(),
             GLiClassNLI(name="gliclass-aux"),
+            DeBERTaNLI(name="deberta"),
+            DeBERTaNLI(name="deberta-aux"),
         ]
         self._impact_scorers: dict[str, ImpactScorer] = {
             f"impact-{i}": ImpactScorer(name=f"impact-{i}") for i in range(1, 4)
