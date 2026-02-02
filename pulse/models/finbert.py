@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 import torch
 from transformers import AutoTokenizer
@@ -75,12 +76,8 @@ class FinBERT(BaseModel):
 
             country_signals = {}
             for sector in country_sectors:
-                if sector.lower() in text_lower:
+                if re.search(r'\b' + re.escape(sector.lower()) + r'\b', text_lower):
                     country_signals[sector] = round(avg_sentiment, 4)
-
-            # If no specific sectors matched, assign to first sector as "general"
-            if not country_signals and country_sectors:
-                country_signals[country_sectors[0]] = round(avg_sentiment, 4)
 
             if country_signals:
                 signals[country.lower()] = country_signals

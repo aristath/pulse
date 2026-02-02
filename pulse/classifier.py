@@ -9,7 +9,6 @@ import psutil
 
 from pulse.models.base import BaseModel
 from pulse.models.gliclass import GLiClassNLI
-from pulse.models.finbert import FinBERT
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
 from pulse.database import (
@@ -73,7 +72,6 @@ WORKER_CONFIGS = [
             ("company_sentiment", "gliclass-aux"),
         ],
     ),
-    ("finbert", [("classify", "finbert")]),
     ("company-scanner", [("scan", None)]),
 ]
 
@@ -86,7 +84,6 @@ WORKER_LABELS = {
     "classify:gliclass": "Classify (GLiClass)",
     "validate:gliclass-aux": "Validate (GLiClass)",
     "company_sentiment:gliclass-aux": "Sentiment (GLiClass)",
-    "classify:finbert": "Classify (FinBERT)",
     "company-scanner": "Company Scanner (GLiNER)",
 }
 
@@ -126,7 +123,6 @@ class EnsembleClassifier:
         self._models: list[BaseModel] = [
             GLiClassNLI(),
             GLiClassNLI(name="gliclass-aux"),
-            FinBERT(),
         ]
         self._impact_scorers: dict[str, ImpactScorer] = {
             f"impact-{i}": ImpactScorer(name=f"impact-{i}") for i in range(1, 4)
@@ -278,16 +274,15 @@ class EnsembleClassifier:
             await save_result(article["id"], model_name, {})
 
         self._clear_model_status(status_key)
-        if model_name != "finbert":
-            delay = _thermal_delay()
-            if delay > 0:
-                logger.info(
-                    "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
-                    model_name,
-                    delay,
-                    thermal_throttle["temp"],
-                )
-                await asyncio.sleep(delay)
+        delay = _thermal_delay()
+        if delay > 0:
+            logger.info(
+                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
+                model_name,
+                delay,
+                thermal_throttle["temp"],
+            )
+            await asyncio.sleep(delay)
         return True
 
     async def score_next_impact(self, scorer_name: str | None = None) -> bool:
