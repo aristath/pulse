@@ -262,6 +262,8 @@
 .sbar-val { width: 52px; font-size: 0.7rem; color: #8888a0; flex-shrink: 0; }
 .sbar-group-label { font-size: 0.75rem; color: #e0e0e8; font-weight: 600; margin-top: 0.75rem; margin-bottom: 0.25rem; }
 .sbar-group-label:first-child { margin-top: 0; }
+.chart-controls { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; font-size: 0.8rem; color: #8888a0; }
+.chart-controls input[type="number"] { background: var(--surface); border: 1px solid var(--border); color: #e0e0e8; border-radius: 4px; padding: 2px 6px; font-size: 0.8rem; }
 </style>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">

@@ -60,6 +60,10 @@
 
         <!-- Charts (preserved across HTMX swaps) -->
         <div id="charts-card" class="dash-card" hx-preserve="true">
+            <div class="chart-controls">
+                <label>Days <input type="number" id="chart-days" value="90" min="1" max="3650" style="width:60px;"></label>
+                <label><input type="checkbox" id="chart-decay" checked> Time decay</label>
+            </div>
             <h3>Sentiment by Country</h3>
             <div id="chart-country-bars" class="sentiment-bars"></div>
 
@@ -280,12 +284,22 @@
             container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
 
+        function chartParams() {
+            var days = document.getElementById('chart-days').value || '90';
+            var decay = document.getElementById('chart-decay').checked;
+            return '&days=' + days + '&decay=' + decay;
+        }
+
+        document.getElementById('chart-days').addEventListener('change', refreshBarCharts);
+        document.getElementById('chart-decay').addEventListener('change', refreshBarCharts);
+
         function refreshBarCharts() {
+            var p = chartParams();
             Promise.all([
-                fetch('/api/charts/sentiment-bars?type=country').then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=industry').then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=detailed').then(function(r) { return r.json(); })
+                fetch('/api/charts/sentiment-bars?type=country' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=industry' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=company' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=detailed' + p).then(function(r) { return r.json(); })
             ]).then(function(results) {
                 renderBarChart(document.getElementById('chart-country-bars'), results[0]);
                 renderBarChart(document.getElementById('chart-industry-bars'), results[1]);

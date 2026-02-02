@@ -515,14 +515,15 @@ async def get_stats(model_count: int = 1) -> dict:
 # --- Charts ---
 
 
-async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
-    """Return decay-weighted average sentiment for the last 30 days.
+async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, decay: bool = True) -> list[dict]:
+    """Return (optionally decay-weighted) average sentiment for the last N days.
 
-    weight = exp(-0.1 * age_days) — today=1.0, 7d~0.50, 14d~0.25, 30d~0.05.
+    When decay=True: weight = exp(-0.1 * age_days).
+    When decay=False: uniform weight (simple average).
     Returns [{label, avg_sentiment, article_count}, ...] sorted by avg_sentiment DESC.
     """
     now = time.time()
-    cutoff = now - 90 * 86400
+    cutoff = now - days * 86400
     db = await get_db()
     try:
         if bar_type == "country":
@@ -602,7 +603,7 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
             if pub is None:
                 continue
             age_days = (now - float(pub)) / 86400
-            weight = math.exp(-0.1 * age_days)
+            weight = math.exp(-0.1 * age_days) if decay else 1.0
             key = (row["country"], row["industry"])
             groups.setdefault(key, []).append((row["sentiment"], weight))
 
@@ -629,7 +630,7 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
         if pub is None:
             continue
         age_days = (now - float(pub)) / 86400
-        weight = math.exp(-0.1 * age_days)
+        weight = math.exp(-0.1 * age_days) if decay else 1.0
         label_groups.setdefault(label, []).append((row["sentiment"], weight))
 
     result = []
