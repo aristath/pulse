@@ -8,7 +8,6 @@ import httpx
 import psutil
 
 from pulse.models.base import BaseModel
-from pulse.models.bgem3 import BgeM3NLI
 from pulse.models.gliclass import GLiClassNLI
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
@@ -73,14 +72,6 @@ WORKER_CONFIGS = [
             ("company_sentiment", "gliclass-aux"),
         ],
     ),
-    ("bgem3", [("classify", "bgem3")]),
-    (
-        "bgem3-aux",
-        [
-            ("validate", "bgem3-aux"),
-            ("company_sentiment", "bgem3-aux"),
-        ],
-    ),
     ("company-scanner", [("scan", None)]),
 ]
 
@@ -93,9 +84,6 @@ WORKER_LABELS = {
     "classify:gliclass": "Classify (GLiClass)",
     "validate:gliclass-aux": "Validate (GLiClass)",
     "company_sentiment:gliclass-aux": "Sentiment (GLiClass)",
-    "classify:bgem3": "Classify (bge-m3)",
-    "validate:bgem3-aux": "Validate (bge-m3)",
-    "company_sentiment:bgem3-aux": "Sentiment (bge-m3)",
     "company-scanner": "Company Scanner (GLiNER)",
 }
 
@@ -135,8 +123,6 @@ class EnsembleClassifier:
         self._models: list[BaseModel] = [
             GLiClassNLI(),
             GLiClassNLI(name="gliclass-aux"),
-            BgeM3NLI(name="bgem3"),
-            BgeM3NLI(name="bgem3-aux"),
         ]
         self._impact_scorers: dict[str, ImpactScorer] = {
             f"impact-{i}": ImpactScorer(name=f"impact-{i}") for i in range(1, 4)
