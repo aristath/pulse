@@ -9,7 +9,6 @@ import psutil
 
 from pulse.models.base import BaseModel
 from pulse.models.deberta import DeBERTaNLI
-from pulse.models.gliclass import GLiClassNLI
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
 from pulse.database import (
@@ -65,14 +64,6 @@ WORKER_CONFIGS = [
     ("impact-1", [("impact", "impact-1")]),
     ("impact-2", [("impact", "impact-2")]),
     ("impact-3", [("impact", "impact-3")]),
-    ("gliclass", [("classify", "gliclass")]),
-    (
-        "gliclass-aux",
-        [
-            ("validate", "gliclass-aux"),
-            ("company_sentiment", "gliclass-aux"),
-        ],
-    ),
     ("deberta", [("classify", "deberta")]),
     (
         "deberta-aux",
@@ -90,9 +81,6 @@ WORKER_LABELS = {
     "impact:impact-1": "Impact 1 (ModernBERT)",
     "impact:impact-2": "Impact 2 (ModernBERT)",
     "impact:impact-3": "Impact 3 (ModernBERT)",
-    "classify:gliclass": "Classify (GLiClass)",
-    "validate:gliclass-aux": "Validate (GLiClass)",
-    "company_sentiment:gliclass-aux": "Sentiment (GLiClass)",
     "classify:deberta": "Classify (DeBERTa)",
     "validate:deberta-aux": "Validate (DeBERTa)",
     "company_sentiment:deberta-aux": "Sentiment (DeBERTa)",
@@ -133,8 +121,6 @@ def _thermal_delay() -> float:
 class EnsembleClassifier:
     def __init__(self):
         self._models: list[BaseModel] = [
-            GLiClassNLI(),
-            GLiClassNLI(name="gliclass-aux"),
             DeBERTaNLI(name="deberta"),
             DeBERTaNLI(name="deberta-aux"),
         ]
@@ -523,7 +509,7 @@ class EnsembleClassifier:
             company_name = name_candidate
             break
 
-        status_key = f"validate:{model_name}" if model_name else "validate:gliclass-aux"
+        status_key = f"validate:{model_name}" if model_name else "validate:deberta-aux"
         processing_status[status_key] = {
             "article_id": article_id,
             "article_url": article_url,
@@ -551,7 +537,7 @@ class EnsembleClassifier:
         if model_name:
             model = self._get_model(model_name)
         if not model:
-            model = self._get_model("gliclass-aux") or self._get_model("gliclass")
+            model = self._get_model("deberta-aux") or self._get_model("deberta")
         if not model:
             self._clear_model_status(status_key)
             return False
@@ -625,7 +611,7 @@ class EnsembleClassifier:
 
             prompt_company = await get_setting("prompt_company") or ""
 
-            status_key = f"company_sentiment:{model_name}" if model_name else "company_sentiment:gliclass-aux"
+            status_key = f"company_sentiment:{model_name}" if model_name else "company_sentiment:deberta-aux"
             processing_status[status_key] = {
                 "article_id": article_id,
                 "article_url": article_url,
@@ -655,7 +641,7 @@ class EnsembleClassifier:
             if model_name:
                 model = self._get_model(model_name)
             if not model:
-                model = self._get_model("gliclass-aux") or self._get_model("gliclass")
+                model = self._get_model("deberta-aux") or self._get_model("deberta")
             if not model:
                 self._clear_model_status(status_key)
                 return False

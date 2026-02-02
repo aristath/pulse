@@ -490,8 +490,6 @@ async def get_stats(model_count: int = 1) -> dict:
             per_worker[f"classify:{model_name}"] = (count, impact_relevant)
         per_worker["company-scanner"] = (company_scanned, scan_eligible)
         # Validate/sentiment are shared across models — show on first available
-        per_worker["validate:gliclass-aux"] = (company_validated, company_mentions)
-        per_worker["company_sentiment:gliclass-aux"] = (company_scored, company_validated)
         per_worker["validate:deberta-aux"] = (company_validated, company_mentions)
         per_worker["company_sentiment:deberta-aux"] = (company_scored, company_validated)
 
