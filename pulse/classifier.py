@@ -8,8 +8,7 @@ import httpx
 import psutil
 
 from pulse.models.base import BaseModel
-from pulse.models.modernbert import ModernBERTNLI
-from pulse.models.deberta import DeBERTaNLI
+from pulse.models.gliclass import GLiClassNLI
 from pulse.models.finbert import FinBERT
 from pulse.models.impact import ImpactScorer
 from pulse.models.gliner import CompanyScanner
@@ -63,21 +62,15 @@ def _cpu_sleep() -> float:
 # Each worker pulls tasks in priority order.
 # Capabilities: (task_type, model_name_or_None)
 WORKER_CONFIGS = [
-    ("impact", [("impact", None)]),
+    ("impact-1", [("impact", "impact-1")]),
+    ("impact-2", [("impact", "impact-2")]),
+    ("impact-3", [("impact", "impact-3")]),
+    ("gliclass", [("classify", "gliclass")]),
     (
-        "modernbert-nli",
+        "gliclass-aux",
         [
-            ("classify", "modernbert-nli"),
-            ("validate", "modernbert-nli"),
-            ("company_sentiment", "modernbert-nli"),
-        ],
-    ),
-    (
-        "deberta-nli",
-        [
-            ("classify", "deberta-nli"),
-            ("validate", "deberta-nli"),
-            ("company_sentiment", "deberta-nli"),
+            ("validate", "gliclass-aux"),
+            ("company_sentiment", "gliclass-aux"),
         ],
     ),
     ("finbert", [("classify", "finbert")]),
@@ -87,12 +80,12 @@ WORKER_CONFIGS = [
 # Display labels for each processing_status key
 WORKER_LABELS = {
     "impact": "Impact (ModernBERT)",
-    "classify:modernbert-nli": "Classify (ModernBERT)",
-    "validate:modernbert-nli": "Validate (ModernBERT)",
-    "company_sentiment:modernbert-nli": "Sentiment (ModernBERT)",
-    "classify:deberta-nli": "Classify (DeBERTa)",
-    "validate:deberta-nli": "Validate (DeBERTa)",
-    "company_sentiment:deberta-nli": "Sentiment (DeBERTa)",
+    "impact:impact-1": "Impact 1 (ModernBERT)",
+    "impact:impact-2": "Impact 2 (ModernBERT)",
+    "impact:impact-3": "Impact 3 (ModernBERT)",
+    "classify:gliclass": "Classify (GLiClass)",
+    "validate:gliclass-aux": "Validate (GLiClass)",
+    "company_sentiment:gliclass-aux": "Sentiment (GLiClass)",
     "classify:finbert": "Classify (FinBERT)",
     "company-scanner": "Company Scanner (GLiNER)",
 }
@@ -131,14 +124,16 @@ def _thermal_delay() -> float:
 class EnsembleClassifier:
     def __init__(self):
         self._models: list[BaseModel] = [
-            ModernBERTNLI(),
-            DeBERTaNLI(),
+            GLiClassNLI(),
+            GLiClassNLI(name="gliclass-aux"),
             FinBERT(),
         ]
-        self._impact_scorer = ImpactScorer()
+        self._impact_scorers: dict[str, ImpactScorer] = {
+            f"impact-{i}": ImpactScorer(name=f"impact-{i}") for i in range(1, 4)
+        }
         self._company_scanner = CompanyScanner()
         self._ticker_aliases: dict[str, list[str]] = {}
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        self._executor = ThreadPoolExecutor(max_workers=8)
         self._loaded = False
         self._countries: list[str] = []
         self._sectors: dict[str, list[str]] = {}
@@ -162,10 +157,12 @@ class EnsembleClassifier:
             self._models.remove(m)
         if self._models:
             self._loaded = True
-            # Share ModernBERT weights with impact scorer
-            modernbert = self._get_model("modernbert-nli")
-            if modernbert:
-                self._impact_scorer.set_model(modernbert._tokenizer, modernbert._model)
+            for name, scorer in list(self._impact_scorers.items()):
+                try:
+                    scorer.load()
+                except Exception:
+                    logger.exception("Failed to load %s", name)
+                    del self._impact_scorers[name]
             # Load company scanner
             try:
                 self._company_scanner.load()
@@ -266,7 +263,7 @@ class EnsembleClassifier:
                     prompt_country,
                     prompt_sentiment,
                 ),
-                timeout=60,
+                timeout=300,
             )
             await save_result(article["id"], model_name, result)
             if result:
@@ -279,23 +276,27 @@ class EnsembleClassifier:
             await save_result(article["id"], model_name, {})
 
         self._clear_model_status(status_key)
-        delay = _thermal_delay()
-        if delay > 0:
-            logger.info(
-                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
-                model_name,
-                delay,
-                thermal_throttle["temp"],
-            )
-            await asyncio.sleep(delay)
+        if model_name != "finbert":
+            delay = _thermal_delay()
+            if delay > 0:
+                logger.info(
+                    "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
+                    model_name,
+                    delay,
+                    thermal_throttle["temp"],
+                )
+                await asyncio.sleep(delay)
         return True
 
-    async def score_next_impact(self) -> bool:
+    async def score_next_impact(self, scorer_name: str | None = None) -> bool:
         """Pick an unscored article, compute its impact, save it.
 
         Returns True if an article was scored, False if none available.
         """
-        if not self._impact_scorer.ready:
+        scorer = self._impact_scorers.get(scorer_name) if scorer_name else None
+        if not scorer:
+            scorer = next((s for s in self._impact_scorers.values() if s.ready), None)
+        if not scorer or not scorer.ready:
             return False
 
         article = await get_next_article_for_impact()
@@ -303,18 +304,19 @@ class EnsembleClassifier:
             return False
         prompt_impact = await get_setting("prompt_impact") or ""
 
-        processing_status[self._impact_scorer.name] = {
+        status_key = f"impact:{scorer.name}"
+        processing_status[status_key] = {
             "article_id": article["id"],
             "article_url": article["url"],
             "started_at": time.time(),
         }
 
-        logger.info("[impact] Scoring article %d: %s", article["id"], article["url"])
+        logger.info("[%s] Scoring article %d: %s", scorer.name, article["id"], article["url"])
 
         content = article["content"]
         if not content:
             await save_impact(article["id"], 0.0)
-            self._clear_model_status(self._impact_scorer.name)
+            self._clear_model_status(status_key)
             return True
 
         loop = asyncio.get_event_loop()
@@ -322,22 +324,22 @@ class EnsembleClassifier:
             score = await asyncio.wait_for(
                 loop.run_in_executor(
                     self._executor,
-                    self._impact_scorer.score,
+                    scorer.score,
                     content,
                     prompt_impact,
                 ),
-                timeout=60,
+                timeout=300,
             )
             await save_impact(article["id"], score)
-            logger.info("[impact] Article %d: %.4f", article["id"], score)
+            logger.info("[%s] Article %d: %.4f", scorer.name, article["id"], score)
         except asyncio.TimeoutError:
-            logger.warning("[impact] Timeout on article %d — skipping", article["id"])
+            logger.warning("[%s] Timeout on article %d — skipping", scorer.name, article["id"])
             await save_impact(article["id"], 0.0)
         except Exception as e:
-            logger.error("[impact] Failed on article %d: %s", article["id"], e)
+            logger.error("[%s] Failed on article %d: %s", scorer.name, article["id"], e)
             await save_impact(article["id"], 0.0)
 
-        self._clear_model_status(self._impact_scorer.name)
+        self._clear_model_status(status_key)
         return True
 
     async def fetch_aliases(self) -> bool:
@@ -444,7 +446,7 @@ class EnsembleClassifier:
                         content,
                         missing,
                     ),
-                    timeout=60,
+                    timeout=300,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
@@ -501,7 +503,7 @@ class EnsembleClassifier:
             company_name = name_candidate
             break
 
-        status_key = f"validate:{model_name}" if model_name else "validate:modernbert-nli"
+        status_key = f"validate:{model_name}" if model_name else "validate:gliclass-aux"
         processing_status[status_key] = {
             "article_id": article_id,
             "article_url": article_url,
@@ -529,23 +531,20 @@ class EnsembleClassifier:
         if model_name:
             model = self._get_model(model_name)
         if not model:
-            model = self._get_model("modernbert-nli") or self._get_model("deberta-nli")
+            model = self._get_model("gliclass-aux") or self._get_model("gliclass")
         if not model:
             self._clear_model_status(status_key)
             return False
 
-        hypothesis = f"This article is about {company_name}."
-
         loop = asyncio.get_event_loop()
         try:
-            entail_scores, _ = await loop.run_in_executor(
+            entail = await loop.run_in_executor(
                 self._executor,
-                model._nli_batch_full,
-                model.truncate(content, 6000),
-                [hypothesis],
+                model.validate_company,
+                content,
+                company_name,
             )
             validate_threshold = float(await get_setting("validate_threshold") or "0.5")
-            entail = entail_scores[0]
             if entail >= validate_threshold:
                 await mark_company_result_validated(article_id, ticker)
                 logger.info(
@@ -606,7 +605,7 @@ class EnsembleClassifier:
 
             prompt_company = await get_setting("prompt_company") or ""
 
-            status_key = f"company_sentiment:{model_name}" if model_name else "company_sentiment:modernbert-nli"
+            status_key = f"company_sentiment:{model_name}" if model_name else "company_sentiment:gliclass-aux"
             processing_status[status_key] = {
                 "article_id": article_id,
                 "article_url": article_url,
@@ -632,32 +631,24 @@ class EnsembleClassifier:
                 self._clear_model_status(status_key)
                 return True
 
-            # Use specified model, or fall back to any available NLI model
             model = None
             if model_name:
                 model = self._get_model(model_name)
             if not model:
-                model = self._get_model("modernbert-nli") or self._get_model(
-                    "deberta-nli"
-                )
+                model = self._get_model("gliclass-aux") or self._get_model("gliclass")
             if not model:
                 self._clear_model_status(status_key)
                 return False
 
-            tpl = prompt_company or "This is good news for {company}."
-            hypothesis = tpl.format(company=company_name)
-
             loop = asyncio.get_event_loop()
             try:
-                entail_scores, contra_scores = await loop.run_in_executor(
+                sentiment, impact = await loop.run_in_executor(
                     self._executor,
-                    model._nli_batch_full,
-                    model.truncate(content, 6000),
-                    [hypothesis],
+                    model.score_company_sentiment,
+                    content,
+                    company_name,
+                    prompt_company,
                 )
-                sentiment = round(entail_scores[0] - contra_scores[0], 4)
-                sentiment = max(-1.0, min(1.0, sentiment))
-                impact = round(max(entail_scores[0], contra_scores[0]), 4)
                 await save_company_sentiment(article_id, ticker, sentiment, impact)
                 logger.info(
                     "[company-sentiment] %s article %d: sentiment=%.4f impact=%.4f",
@@ -750,7 +741,7 @@ class EnsembleClassifier:
                         if task_type == "classify" and model:
                             did_work = await self.classify_next_for_model(model)
                         elif task_type == "impact":
-                            did_work = await self.score_next_impact()
+                            did_work = await self.score_next_impact(model)
                         elif task_type == "scan":
                             did_work = await self.scan_next_article()
                         elif task_type == "validate":
@@ -765,8 +756,6 @@ class EnsembleClassifier:
                         logger.exception(
                             "[worker:%s] Error in %s", worker_name, task_type
                         )
-                    if did_work:
-                        break
 
                 delay = _cpu_sleep()
                 if not did_work:

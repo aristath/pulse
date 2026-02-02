@@ -215,46 +215,6 @@
             {% endfor %}
         </div>
 
-        <!-- Worker Results -->
-        {% if stats.per_worker %}
-        <div class="dash-card">
-            <h3>Worker Progress</h3>
-            {% for key, pair in stats.per_worker.items() %}
-            {% set done = pair[0] %}
-            {% set total = pair[1] %}
-            {% set pct = (done * 100 / total) | round(1) if total > 0 else 0 %}
-            <div class="model-row">
-                <span class="kv-label">{{ worker_labels.get(key, key) }}</span>
-                <span class="kv-value">{{ done }}/{{ total }} <span style="color:var(--text-dim);font-size:0.75rem;">({{ pct }}%)</span></span>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <!-- Counts -->
-        <div class="dash-card">
-            <h3>Counts</h3>
-            <div class="kv-row">
-                <span class="kv-label">Total Articles</span>
-                <span class="kv-value">{{ stats.total_articles }}</span>
-            </div>
-            <div class="kv-row">
-                <span class="kv-label">Feeds</span>
-                <span class="kv-value">{{ stats.total_feeds }}</span>
-            </div>
-            <div class="kv-row">
-                <span class="kv-label">Unscored</span>
-                <span class="kv-value">{{ stats.impact_unscored }}</span>
-            </div>
-            <div class="kv-row">
-                <span class="kv-label">Company Mentions</span>
-                <span class="kv-value">{{ stats.company_mentions }}</span>
-            </div>
-            <div class="kv-row">
-                <span class="kv-label">Sentiment Scored</span>
-                <span class="kv-value">{{ stats.company_scored }}</span>
-            </div>
-        </div>
     </div>
 </div>
 

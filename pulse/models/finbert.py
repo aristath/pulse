@@ -1,8 +1,12 @@
 import logging
+import threading
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 
-from pulse.models.base import BaseModel, get_torch_device, is_latin_text
+from pulse.models.base import (
+    BaseModel, get_torch_device, is_latin_text,
+    HAS_OPENVINO, load_sequence_classification_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +27,16 @@ class FinBERT(BaseModel):
     def __init__(self):
         self._tokenizer = None
         self._model = None
+        self._lock = threading.Lock()
 
     def load(self):
         model_id = "ProsusAI/finbert"
         self._device = get_torch_device()
-        logger.info("Loading %s on %s...", model_id, self._device)
+        backend = "OpenVINO GPU" if HAS_OPENVINO else str(self._device)
+        logger.info("Loading %s on %s...", model_id, backend)
         self._tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self._model = AutoModelForSequenceClassification.from_pretrained(model_id)
-        self._model.to(self._device)
-        self._model.eval()
-        logger.info("%s loaded on %s", self.name, self._device)
+        self._model = load_sequence_classification_model(model_id, device="GPU")
+        logger.info("%s loaded on %s", self.name, backend)
 
     def classify(
         self,
@@ -95,9 +99,14 @@ class FinBERT(BaseModel):
         """Return sentiment score: positive (0 to 1), negative (-1 to 0)."""
         inputs = self._tokenizer(
             text, return_tensors="pt", truncation=True, max_length=512
-        ).to(self._device)
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
+        )
+        with self._lock:
+            if not HAS_OPENVINO:
+                inputs = inputs.to(self._device)
+                with torch.no_grad():
+                    logits = self._model(**inputs).logits
+            else:
+                logits = self._model(**inputs).logits
         probs = torch.softmax(logits, dim=-1)
         # FinBERT: [positive, negative, neutral]
         positive = probs[0, 0].item()

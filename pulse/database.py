@@ -1,6 +1,28 @@
 import json
-import aiosqlite
+import logging
+from datetime import datetime
 from pathlib import Path
+
+import aiosqlite
+from dateutil import parser as dateutil_parser
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_date(value) -> int | None:
+    """Convert any date representation to a unix timestamp (int)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, datetime):
+        return int(value.timestamp())
+    try:
+        return int(dateutil_parser.parse(str(value)).timestamp())
+    except (ValueError, TypeError):
+        logger.warning("Could not parse date: %r", value)
+        return None
+
 
 DB_PATH = Path(__file__).parent.parent / "data" / "pulse.db"
 
@@ -173,7 +195,7 @@ async def add_articles(feed_id: int, articles: list[dict]) -> int:
             try:
                 await db.execute(
                     "INSERT INTO articles (feed_id, url, published_at) VALUES (?, ?, ?)",
-                    (feed_id, article["url"], article.get("published_at")),
+                    (feed_id, article["url"], _normalize_date(article.get("published_at"))),
                 )
                 added += 1
             except aiosqlite.IntegrityError:
@@ -212,17 +234,27 @@ async def get_unprocessed_article_for_model(model: str) -> dict | None:
 
 
 async def get_next_article_for_impact() -> dict | None:
-    """Get an article that hasn't been impact-scored yet, newest first."""
+    """Claim and return an article that hasn't been impact-scored yet, newest first.
+
+    Sets impact = -1.0 as a claim sentinel so parallel workers don't pick
+    the same row. The real score overwrites this after inference.
+    """
     db = await get_db()
     try:
         cursor = await db.execute("""
-            SELECT a.* FROM articles a
-            WHERE a.impact IS NULL
-              AND a.content IS NOT NULL AND a.content != ''
-            ORDER BY a.published_at DESC, a.id DESC
-            LIMIT 1
+            UPDATE articles
+            SET impact = -1.0
+            WHERE id = (
+                SELECT a.id FROM articles a
+                WHERE a.impact IS NULL
+                  AND a.content IS NOT NULL AND a.content != ''
+                ORDER BY a.published_at DESC, a.id DESC
+                LIMIT 1
+            )
+            RETURNING *
         """)
         row = await cursor.fetchone()
+        await db.commit()
         return dict(row) if row else None
     finally:
         await db.close()
@@ -268,7 +300,7 @@ async def update_article_date(article_id: int, published_at: str):
     try:
         await db.execute(
             "UPDATE articles SET published_at = ? WHERE id = ? AND published_at IS NULL",
-            (published_at, article_id),
+            (_normalize_date(published_at), article_id),
         )
         await db.commit()
     finally:
@@ -447,13 +479,17 @@ async def get_stats(model_count: int = 1) -> dict:
         )[0]
 
         # Build per-worker progress: (done, total) keyed by processing_status keys
-        per_worker = {"impact": (impact_scored, total)}
+        per_worker = {
+            "impact:impact-1": (impact_scored, total),
+            "impact:impact-2": (impact_scored, total),
+            "impact:impact-3": (impact_scored, total),
+        }
         for model_name, count in classify_counts.items():
             per_worker[f"classify:{model_name}"] = (count, impact_relevant)
         per_worker["company-scanner"] = (company_scanned, scan_eligible)
         # Validate/sentiment are shared across models — show on first available
-        per_worker["validate:modernbert-nli"] = (company_validated, company_mentions)
-        per_worker["company_sentiment:modernbert-nli"] = (company_scored, company_validated)
+        per_worker["validate:gliclass-aux"] = (company_validated, company_mentions)
+        per_worker["company_sentiment:gliclass-aux"] = (company_scored, company_validated)
 
         return {
             "total_articles": total,
@@ -494,22 +530,23 @@ async def get_impact_distribution() -> list[dict]:
 
 
 def _date_bucket_expr(col: str, period: str) -> str:
-    """Return a SQL expression that buckets a date column by period."""
+    """Return a SQL expression that buckets a unix-timestamp column by period."""
+    u = f"{col}, 'unixepoch'"
     if period == "6m":
         return (
-            f"CASE WHEN CAST(strftime('%m', {col}) AS INTEGER) <= 6 "
-            f"THEN strftime('%Y', {col}) || '-01-01' "
-            f"ELSE strftime('%Y', {col}) || '-07-01' END"
+            f"CASE WHEN CAST(strftime('%m', {u}) AS INTEGER) <= 6 "
+            f"THEN strftime('%Y', {u}) || '-01-01' "
+            f"ELSE strftime('%Y', {u}) || '-07-01' END"
         )
     if period == "1y":
-        return f"strftime('%Y', {col}) || '-01-01'"
+        return f"strftime('%Y', {u}) || '-01-01'"
     # Default: 3m (quarterly)
     return (
-        f"CASE ((CAST(strftime('%m', {col}) AS INTEGER) - 1) / 3) "
-        f"WHEN 0 THEN strftime('%Y', {col}) || '-01-01' "
-        f"WHEN 1 THEN strftime('%Y', {col}) || '-04-01' "
-        f"WHEN 2 THEN strftime('%Y', {col}) || '-07-01' "
-        f"WHEN 3 THEN strftime('%Y', {col}) || '-10-01' END"
+        f"CASE ((CAST(strftime('%m', {u}) AS INTEGER) - 1) / 3) "
+        f"WHEN 0 THEN strftime('%Y', {u}) || '-01-01' "
+        f"WHEN 1 THEN strftime('%Y', {u}) || '-04-01' "
+        f"WHEN 2 THEN strftime('%Y', {u}) || '-07-01' "
+        f"WHEN 3 THEN strftime('%Y', {u}) || '-10-01' END"
     )
 
 
@@ -803,7 +840,7 @@ async def add_fundus_articles(articles: list[dict]) -> int:
                         article["url"],
                         article.get("title"),
                         article.get("content"),
-                        article.get("published_at"),
+                        _normalize_date(article.get("published_at")),
                     ),
                 )
                 added += 1
@@ -850,7 +887,7 @@ async def store_article_content(article_id: int, content: str, published_at: str
     try:
         await db.execute(
             "UPDATE articles SET content = ?, published_at = COALESCE(published_at, ?) WHERE id = ?",
-            (content, published_at, article_id),
+            (content, _normalize_date(published_at), article_id),
         )
         await db.commit()
     finally:

@@ -1,6 +1,15 @@
 from abc import ABC, abstractmethod
+import logging
 
 import torch
+
+try:
+    from optimum.intel import OVModelForSequenceClassification
+    HAS_OPENVINO = True
+except ImportError:
+    HAS_OPENVINO = False
+
+logger = logging.getLogger(__name__)
 
 
 def get_torch_device() -> torch.device:
@@ -23,6 +32,43 @@ def is_latin_text(text: str, threshold: float = 0.5) -> bool:
     sample = text[:500]
     latin = sum(1 for c in sample if c.isascii() or '\u00C0' <= c <= '\u024F')
     return latin / len(sample) >= threshold
+
+
+def load_sequence_classification_model(model_id: str, device: str = "CPU", openvino_cache: str | None = None):
+    """Load model via OpenVINO on the given device if available, else PyTorch.
+
+    Args:
+        model_id: HuggingFace model ID.
+        device: OpenVINO device target ("GPU", "CPU"). Ignored when falling back to PyTorch.
+        openvino_cache: Optional path for cached IR files.
+    """
+    if HAS_OPENVINO:
+        from pathlib import Path
+        cache_dir = str(Path(openvino_cache or f"./ov_models/{model_id.replace('/', '_')}").resolve())
+        try:
+            model = OVModelForSequenceClassification.from_pretrained(cache_dir, compile=False)
+            model.to(device.lower())
+            model.compile()
+            logger.info("Loaded OpenVINO model on %s from cache: %s", device, cache_dir)
+            return model
+        except Exception:
+            pass
+        try:
+            logger.info("Converting %s to OpenVINO IR...", model_id)
+            model = OVModelForSequenceClassification.from_pretrained(model_id, export=True, compile=False)
+            model.save_pretrained(cache_dir)
+            model.to(device.lower())
+            model.compile()
+            logger.info("Saved OpenVINO IR to %s, compiled on %s", cache_dir, device)
+            return model
+        except Exception:
+            logger.warning("OpenVINO failed for %s on %s, falling back to PyTorch", model_id, device)
+
+    from transformers import AutoModelForSequenceClassification
+    model = AutoModelForSequenceClassification.from_pretrained(model_id)
+    model.to(get_torch_device())
+    model.eval()
+    return model
 
 
 class BaseModel(ABC):

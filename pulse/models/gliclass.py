@@ -1,111 +1,130 @@
 import logging
-from gliclass import GLiClassModel, ZeroShotClassificationPipeline
-from transformers import AutoTokenizer
+import threading
 
-from pulse.models.base import BaseModel
+import torch
+from transformers import AutoTokenizer
+from gliclass import GLiClassModel
+
+from pulse.models.base import BaseModel, is_latin_text
 
 logger = logging.getLogger(__name__)
 
+MODEL_ID = "knowledgator/GLiClass-modern-base-v3.0"
 RELEVANCE_THRESHOLD = 0.3
 SENTIMENT_THRESHOLD = 0.2
 
 
-class GLiClassLarge(BaseModel):
-    name = "gliclass-large"
+class GLiClassNLI(BaseModel):
+    """GLiClass-modern-base-v3.0: zero-shot classification via label tags.
 
-    def __init__(self):
-        self._pipeline = None
+    All labels processed in a single forward pass instead of per-hypothesis NLI.
+    Uses torch.compile with OpenVINO backend for GPU acceleration when available,
+    falls back to plain PyTorch CPU.
+    """
 
-    def load(self):
-        model_id = "knowledgator/GLiClass-modern-large-v2.0"
-        logger.info("Loading %s...", model_id)
-        model = GLiClassModel.from_pretrained(model_id)
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self._pipeline = ZeroShotClassificationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            classification_type="multi-label",
-            device="cpu",
-        )
-        logger.info("%s loaded", self.name)
+    name = "gliclass"
 
-    def classify(
-        self, text: str, countries: list[str], sectors: dict[str, list[str]]
-    ) -> dict:
-        text = self.truncate(text, 6000)
-        return _gliclass_classify(self._pipeline, text, countries, sectors)
-
-
-class GLiClassBase(BaseModel):
-    name = "gliclass-base"
-
-    def __init__(self):
-        self._pipeline = None
+    def __init__(self, name: str = "gliclass"):
+        self.name = name
+        self._tokenizer = None
+        self._model = None
+        self._prompt_first = True
+        self._lock = threading.Lock()
 
     def load(self):
-        model_id = "knowledgator/GLiClass-modern-base-v3.0"
-        logger.info("Loading %s...", model_id)
-        model = GLiClassModel.from_pretrained(model_id)
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self._pipeline = ZeroShotClassificationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            classification_type="multi-label",
-            device="cpu",
+        logger.info("Loading %s...", MODEL_ID)
+        self._tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+        self._model = GLiClassModel.from_pretrained(MODEL_ID)
+        self._model.eval()
+        self._prompt_first = getattr(self._model.config, "prompt_first", True)
+        logger.info("GLiClass loaded on CPU")
+
+    def _infer(self, text: str, labels: list[str]) -> list[float]:
+        """Prepend <<LABEL>> tags, tokenize, run model, sigmoid -> scores."""
+        tag_str = "".join(f"<<LABEL>>{lbl}" for lbl in labels) + "<<SEP>>"
+        full = tag_str + text if self._prompt_first else text + tag_str
+
+        inputs = self._tokenizer(
+            full, return_tensors="pt", truncation=True, max_length=4096,
         )
-        logger.info("%s loaded", self.name)
+
+        with self._lock:
+            with torch.no_grad():
+                out = self._model(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                )
+                logits = out.logits
+
+        return torch.sigmoid(logits[0, : len(labels)]).tolist()
 
     def classify(
-        self, text: str, countries: list[str], sectors: dict[str, list[str]]
+        self,
+        text: str,
+        countries: list[str],
+        sectors: dict[str, list[str]],
+        prompt_country: str = "",
+        prompt_sentiment: str = "",
     ) -> dict:
+        if not is_latin_text(text):
+            return {}
+
         text = self.truncate(text, 6000)
-        return _gliclass_classify(self._pipeline, text, countries, sectors)
 
+        # Pass 1: country relevance
+        country_labels = [f"This article is about {c}" for c in countries]
+        scores = self._infer(text, country_labels)
+        relevant = [c for c, s in zip(countries, scores) if s >= RELEVANCE_THRESHOLD]
+        if not relevant:
+            return {}
 
-def _gliclass_classify(pipeline, text, countries, sectors):
-    """Shared two-pass classification logic for GLiClass models."""
-    # Pass 1: Which countries are relevant?
-    country_labels = [f"This article is about {c}" for c in countries]
-    results = pipeline(text, country_labels, multi_label=True)
-    relevant = []
-    for label, score in zip(results["labels"], results["scores"]):
-        if score >= RELEVANCE_THRESHOLD:
-            # Extract country name from label
-            country = label.replace("This article is about ", "")
-            relevant.append(country)
-
-    if not relevant:
-        return {}
-
-    # Pass 2: For each relevant country, classify sectors + sentiment
-    signals = {}
-    for country in relevant:
-        country_sectors = sectors.get(country, sectors.get("global", []))
-        if not country_sectors:
-            continue
-
-        labels = []
-        for sector in country_sectors:
-            labels.append(f"positive for {country} {sector}")
-            labels.append(f"negative for {country} {sector}")
-
-        results = pipeline(text, labels, multi_label=True)
-        country_signals = {}
-        for label, score in zip(results["labels"], results["scores"]):
-            if score < SENTIMENT_THRESHOLD:
+        # Pass 2: sector sentiment per relevant country
+        signals: dict = {}
+        for country in relevant:
+            country_sectors = sectors.get(country, sectors.get("global", []))
+            if not country_sectors:
                 continue
-            if label.startswith("positive for"):
-                sector = label.replace(f"positive for {country} ", "")
-                country_signals[sector] = country_signals.get(sector, 0) + score
-            elif label.startswith("negative for"):
-                sector = label.replace(f"negative for {country} ", "")
-                country_signals[sector] = country_signals.get(sector, 0) - score
 
-        # Clamp to [-1, 1]
-        for s in country_signals:
-            country_signals[s] = max(-1.0, min(1.0, round(country_signals[s], 4)))
+            labels = []
+            for sector in country_sectors:
+                labels.append(f"positive for {country} {sector}")
+                labels.append(f"negative for {country} {sector}")
 
-        if country_signals:
-            signals[country.lower()] = country_signals
+            label_scores = self._infer(text, labels)
 
-    return signals
+            country_signals: dict = {}
+            for i, sector in enumerate(country_sectors):
+                pos = label_scores[i * 2]
+                neg = label_scores[i * 2 + 1]
+                if pos >= SENTIMENT_THRESHOLD or neg >= SENTIMENT_THRESHOLD:
+                    sentiment = max(-1.0, min(1.0, round(pos - neg, 4)))
+                    country_signals[sector] = sentiment
+
+            if country_signals:
+                signals[country.lower()] = country_signals
+
+        return signals
+
+    def validate_company(self, text: str, company_name: str) -> float:
+        """Score how relevant the article is to the given company."""
+        text = self.truncate(text, 6000)
+        scores = self._infer(text, [f"This article is about {company_name}"])
+        return scores[0]
+
+    def score_company_sentiment(
+        self, text: str, company_name: str, prompt: str = "",
+    ) -> tuple[float, float]:
+        """Return (sentiment, impact) for the company.
+
+        sentiment = pos - neg, clamped to [-1, 1].
+        impact    = max(pos, neg).
+        """
+        text = self.truncate(text, 6000)
+        scores = self._infer(
+            text,
+            [f"positive for {company_name}", f"negative for {company_name}"],
+        )
+        pos, neg = scores[0], scores[1]
+        sentiment = max(-1.0, min(1.0, round(pos - neg, 4)))
+        impact = round(max(pos, neg), 4)
+        return sentiment, impact

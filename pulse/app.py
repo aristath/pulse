@@ -25,7 +25,34 @@ from pulse.scheduler import start_scheduler, stop_scheduler
 
 
 def _model_count() -> int:
-    return max(len(ensemble.model_names), 1)
+    """Count models that do classify work (write to results table)."""
+    from pulse.classifier import WORKER_CONFIGS
+    return max(sum(1 for _, caps in WORKER_CONFIGS if any(t == "classify" for t, _ in caps)), 1)
+
+
+def _merge_impact_workers(processing: dict, avg_times: dict) -> tuple[dict, dict]:
+    """Collapse impact-1/2/3 into a single 'impact' entry for the UI."""
+    merged_proc = {}
+    merged_avg = {}
+    impact_entries = []
+    impact_avgs = []
+    for key, val in processing.items():
+        if key.startswith("impact:impact-"):
+            impact_entries.append(val)
+            if avg_times.get(key) is not None:
+                impact_avgs.append(avg_times[key])
+        else:
+            merged_proc[key] = val
+            merged_avg[key] = avg_times.get(key)
+    # Pick the most recently started active impact worker, or idle
+    active = [e for e in impact_entries if e.get("article_id")]
+    if active:
+        best = max(active, key=lambda e: e.get("started_at") or 0)
+    else:
+        best = {"article_id": None, "article_url": None, "started_at": None}
+    merged_proc["impact"] = best
+    merged_avg["impact"] = round(sum(impact_avgs) / len(impact_avgs), 1) if impact_avgs else None
+    return merged_proc, merged_avg
 
 
 logger = logging.getLogger(__name__)
@@ -79,7 +106,7 @@ app = FastAPI(title="Pulse", docs_url="/docs", lifespan=lifespan)
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     stats = await db.get_stats(_model_count())
-    avg_times = get_worker_avg_times()
+    processing, avg_times = _merge_impact_workers(processing_status, get_worker_avg_times())
     feeds = await db.get_feeds()
     sentinel_url = await db.get_setting("sentinel_url") or ""
     prompt_impact = await db.get_setting("prompt_impact") or ""
@@ -94,7 +121,7 @@ async def dashboard(request: Request):
         {
             "request": request,
             "stats": stats,
-            "processing": processing_status,
+            "processing": processing,
             "avg_times": avg_times,
             "worker_labels": WORKER_LABELS,
             "feeds": feeds,
@@ -389,7 +416,7 @@ async def sse_events(request: Request):
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def partial_stats(request: Request):
     stats = await db.get_stats(_model_count())
-    avg_times = get_worker_avg_times()
+    processing, avg_times = _merge_impact_workers(processing_status, get_worker_avg_times())
     feeds = await db.get_feeds()
     sentinel_url = await db.get_setting("sentinel_url") or ""
     prompt_impact = await db.get_setting("prompt_impact") or ""
@@ -404,7 +431,7 @@ async def partial_stats(request: Request):
         {
             "request": request,
             "stats": stats,
-            "processing": processing_status,
+            "processing": processing,
             "avg_times": avg_times,
             "worker_labels": WORKER_LABELS,
             "feeds": feeds,
