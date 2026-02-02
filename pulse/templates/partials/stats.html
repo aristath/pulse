@@ -302,14 +302,15 @@
                         return d.label + '<br>Sentiment: ' + d.avg_sentiment.toFixed(4) + '<br>Articles: ' + d.article_count;
                     }
                 },
-                grid: { top: 10, left: 50, right: 10, bottom: 80 },
-                xAxis: {
+                grid: { top: 10, left: 100, right: 10, bottom: 20 },
+                yAxis: {
                     type: 'category',
                     data: labels,
+                    inverse: true,
                     axisLine: { lineStyle: { color: '#1e1e2e' } },
-                    axisLabel: { color: '#8888a0', fontSize: 10, rotate: labels.length > 8 ? 45 : 0 }
+                    axisLabel: { color: '#8888a0', fontSize: 10 }
                 },
-                yAxis: {
+                xAxis: {
                     type: 'value',
                     min: -1, max: 1,
                     axisLine: { lineStyle: { color: '#1e1e2e' } },
