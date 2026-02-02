@@ -208,8 +208,8 @@ async def api_article_company_results(article_id: int):
 
 @app.get("/api/charts/sentiment-bars")
 async def api_charts_sentiment_bars(type: str = "country"):
-    if type not in ("country", "industry", "company"):
-        raise HTTPException(400, "type must be 'country', 'industry', or 'company'")
+    if type not in ("country", "industry", "company", "detailed"):
+        raise HTTPException(400, "type must be 'country', 'industry', 'company', or 'detailed'")
     threshold = float(await db.get_setting("classify_threshold") or "0.5")
     return await db.get_sentiment_bars(type, threshold)
 

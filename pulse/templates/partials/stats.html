@@ -66,6 +66,12 @@
             <h3 style="margin-top:1.5rem;">Sentiment by Industry</h3>
             <div id="chart-industry-bars" class="sentiment-bars"></div>
 
+            <h3 style="margin-top:1.5rem;">Industries by Country</h3>
+            <div id="chart-industries-by-country"></div>
+
+            <h3 style="margin-top:1.5rem;">Countries by Industry</h3>
+            <div id="chart-countries-by-industry"></div>
+
             <h3 style="margin-top:1.5rem;">Sentiment by Company</h3>
             <div id="chart-company-bars" class="sentiment-bars"></div>
         </div>
@@ -243,15 +249,49 @@
             container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
 
+        function renderGroupedCharts(container, data, groupKey, labelKey) {
+            var groups = {};
+            for (var i = 0; i < data.length; i++) {
+                var d = data[i];
+                var g = d[groupKey];
+                if (!groups[g]) groups[g] = [];
+                groups[g].push({label: d[labelKey], avg_sentiment: d.avg_sentiment, article_count: d.article_count});
+            }
+            var html = '';
+            var keys = Object.keys(groups).sort();
+            for (var k = 0; k < keys.length; k++) {
+                var items = groups[keys[k]];
+                items.sort(function(a, b) { return b.avg_sentiment - a.avg_sentiment; });
+                html += '<div class="sbar-group-label">' + keys[k] + '</div>';
+                for (var j = 0; j < items.length; j++) {
+                    var d = items[j];
+                    var v = d.avg_sentiment;
+                    var pct = Math.abs(v) * 50;
+                    var color = v >= 0 ? '#22c55e' : '#ef4444';
+                    var left = v >= 0 ? '50%' : (50 - pct) + '%';
+                    html += '<div class="sbar-row" title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
+                        + '<span class="sbar-label">' + d.label + '</span>'
+                        + '<div class="sbar-track"><div class="sbar-zero"></div>'
+                        + '<div class="sbar-fill" style="left:' + left + ';width:' + pct + '%;background:' + color + '"></div></div>'
+                        + '<span class="sbar-val">' + v.toFixed(3) + '</span>'
+                        + '</div>';
+                }
+            }
+            container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
+        }
+
         function refreshBarCharts() {
             Promise.all([
                 fetch('/api/charts/sentiment-bars?type=country').then(function(r) { return r.json(); }),
                 fetch('/api/charts/sentiment-bars?type=industry').then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); })
+                fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=detailed').then(function(r) { return r.json(); })
             ]).then(function(results) {
                 renderBarChart(document.getElementById('chart-country-bars'), results[0]);
                 renderBarChart(document.getElementById('chart-industry-bars'), results[1]);
                 renderBarChart(document.getElementById('chart-company-bars'), results[2]);
+                renderGroupedCharts(document.getElementById('chart-industries-by-country'), results[3], 'country', 'industry');
+                renderGroupedCharts(document.getElementById('chart-countries-by-industry'), results[3], 'industry', 'country');
             }).catch(function(e) { console.error('Bar chart refresh failed:', e); });
         }
 

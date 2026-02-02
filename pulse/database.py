@@ -559,6 +559,23 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
                 """,
                 (cutoff, threshold),
             )
+        elif bar_type == "detailed":
+            cursor = await db.execute(
+                """
+                SELECT r.article_id, country.key AS country,
+                       sector.key AS industry,
+                       CAST(sector.value AS REAL) AS sentiment,
+                       a.published_at
+                FROM results r
+                JOIN articles a ON r.article_id = a.id,
+                     json_each(r.signals) AS country,
+                     json_each(country.value) AS sector
+                WHERE a.published_at >= ?
+                  AND a.impact IS NOT NULL AND a.impact >= ?
+                  AND r.signals != '{}'
+                """,
+                (cutoff, threshold),
+            )
         elif bar_type == "company":
             cursor = await db.execute(
                 """
@@ -572,14 +589,40 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
                 (cutoff,),
             )
         else:
-            raise ValueError(f"bar_type must be 'country', 'industry', or 'company', got {bar_type!r}")
+            raise ValueError(f"bar_type must be 'country', 'industry', 'company', or 'detailed', got {bar_type!r}")
 
         rows = await cursor.fetchall()
     finally:
         await db.close()
 
+    if bar_type == "detailed":
+        groups: dict[tuple[str, str], list[tuple[float, float]]] = {}
+        for row in rows:
+            pub = row["published_at"]
+            if pub is None:
+                continue
+            age_days = (now - float(pub)) / 86400
+            weight = math.exp(-0.1 * age_days)
+            key = (row["country"], row["industry"])
+            groups.setdefault(key, []).append((row["sentiment"], weight))
+
+        result = []
+        for (country, industry), entries in groups.items():
+            total_weight = sum(w for _, w in entries)
+            if total_weight == 0:
+                continue
+            avg = sum(s * w for s, w in entries) / total_weight
+            result.append({
+                "country": country,
+                "industry": industry,
+                "avg_sentiment": avg,
+                "article_count": len(entries),
+            })
+        result.sort(key=lambda x: x["avg_sentiment"], reverse=True)
+        return result
+
     # Group by label and compute decay-weighted average
-    groups: dict[str, list[tuple[float, float]]] = {}
+    label_groups: dict[str, list[tuple[float, float]]] = {}
     for row in rows:
         label = row["label"]
         pub = row["published_at"]
@@ -587,10 +630,10 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
             continue
         age_days = (now - float(pub)) / 86400
         weight = math.exp(-0.1 * age_days)
-        groups.setdefault(label, []).append((row["sentiment"], weight))
+        label_groups.setdefault(label, []).append((row["sentiment"], weight))
 
     result = []
-    for label, entries in groups.items():
+    for label, entries in label_groups.items():
         total_weight = sum(w for _, w in entries)
         if total_weight == 0:
             continue

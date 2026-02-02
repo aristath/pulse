@@ -260,6 +260,8 @@
 .sbar-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #333; }
 .sbar-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; transition: width 0.3s, left 0.3s; }
 .sbar-val { width: 52px; font-size: 0.7rem; color: #8888a0; flex-shrink: 0; }
+.sbar-group-label { font-size: 0.75rem; color: #e0e0e8; font-weight: 600; margin-top: 0.75rem; margin-bottom: 0.25rem; }
+.sbar-group-label:first-child { margin-top: 0; }
 </style>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
