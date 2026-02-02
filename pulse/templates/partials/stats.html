@@ -1,6 +1,6 @@
 <!-- Row 1: Health Bar -->
 <div class="health-bar">
-    <div class="health-dots">
+    <div id="health-dots" class="health-dots">
         {% for name, status in processing.items() %}
         <div class="health-dot {{ 'active' if status.article_id else '' }}" title="{{ worker_labels.get(name, name) }}"{% if status.started_at %} data-started="{{ status.started_at }}"{% endif %}>
             <div class="tooltip">
@@ -11,10 +11,10 @@
         {% endfor %}
     </div>
     <div class="health-stats">
-        <span class="health-stat">Queue <strong>{{ stats.impact_unscored }}</strong></span>
-        <span class="health-stat">Relevant <strong>{{ stats.impact_relevant }}</strong></span>
-        <span class="health-stat">Mentions <strong>{{ stats.company_mentions }}</strong></span>
-        <span class="health-stat">Sent <strong>{{ stats.sent_articles }}</strong></span>
+        <span class="health-stat">Queue <strong id="hs-queue">{{ stats.impact_unscored }}</strong></span>
+        <span class="health-stat">Relevant <strong id="hs-relevant">{{ stats.impact_relevant }}</strong></span>
+        <span class="health-stat">Mentions <strong id="hs-mentions">{{ stats.company_mentions }}</strong></span>
+        <span class="health-stat">Sent <strong id="hs-sent">{{ stats.sent_articles }}</strong></span>
     </div>
 </div>
 
@@ -27,39 +27,39 @@
             <h3>Pipeline Flow</h3>
             <div class="pipeline">
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.total_articles }}</span>
+                    <span class="count" id="ps-ingested">{{ stats.total_articles }}</span>
                     Ingested
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.impact_scored }}</span>
+                    <span class="count" id="ps-impact">{{ stats.impact_scored }}</span>
                     Impact Scored
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.impact_relevant }}</span>
+                    <span class="count" id="ps-relevant">{{ stats.impact_relevant }}</span>
                     Relevant
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.processed_articles }}</span>
+                    <span class="count" id="ps-classified">{{ stats.processed_articles }}</span>
                     NLI Classified
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.company_scanned }}</span>
+                    <span class="count" id="ps-scanned">{{ stats.company_scanned }}</span>
                     Co. Scanned
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
-                    <span class="count">{{ stats.sent_articles }}</span>
+                    <span class="count" id="ps-sent">{{ stats.sent_articles }}</span>
                     Sent
                 </div>
             </div>
         </div>
 
         <!-- Charts (preserved across HTMX swaps) -->
-        <div id="charts-card" class="dash-card" hx-preserve="true">
+        <div id="charts-card" class="dash-card">
             <div class="chart-controls">
                 <label>Days <input type="number" id="chart-days" value="90" min="1" max="3650" style="width:60px;"></label>
                 <label><input type="checkbox" id="chart-decay" checked> Time decay</label>
@@ -80,19 +80,8 @@
             <div id="chart-company-bars" class="sentiment-bars"></div>
         </div>
 
-        <!-- Article detail modal -->
-        <div id="article-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-            <div class="modal-box">
-                <div class="modal-header">
-                    <span id="modal-title"></span>
-                    <button onclick="document.getElementById('article-modal').style.display='none'">&times;</button>
-                </div>
-                <div id="modal-body"></div>
-            </div>
-        </div>
-
-        <!-- Feeds (collapsible, preserved across HTMX swaps) -->
-        <details id="feeds-section" class="collapsible-section" hx-preserve="true">
+        <!-- Feeds -->
+        <details id="feeds-section" class="collapsible-section">
             <summary>Feeds ({{ feeds|length }})</summary>
             <div class="collapsible-body">
                 <form hx-post="/api/feeds" hx-target="#feeds-list" hx-swap="outerHTML"
@@ -110,7 +99,7 @@
         </details>
 
         <!-- Settings (collapsible, preserved across HTMX swaps) -->
-        <details id="settings-section" class="collapsible-section" hx-preserve="true">
+        <details id="settings-section" class="collapsible-section">
             <summary>Settings</summary>
             <div class="collapsible-body">
                 <div class="settings-group">
@@ -195,6 +184,7 @@
         <!-- Workers -->
         <div class="dash-card">
             <h3>Workers</h3>
+            <div id="worker-rows">
             {% for name, status in processing.items() %}
             <div class="worker-row">
                 <div class="worker-dot {{ 'active' if status.article_id else '' }}"{% if status.started_at %} data-started="{{ status.started_at }}"{% endif %}></div>
@@ -212,6 +202,7 @@
                 {% endif %}
             </div>
             {% endfor %}
+            </div>
         </div>
 
     </div>
@@ -434,4 +425,62 @@ function triggerFundusCrawl(btn) {
             btn.textContent = 'Crawl Now';
         });
 }
+
+// --- SSE live updates (targeted DOM patching) ---
+(function() {
+    if (window._sseConnected) return;
+    window._sseConnected = true;
+
+    var src = new EventSource('/api/events');
+    src.addEventListener('update', function(e) {
+        var d = JSON.parse(e.data);
+        var s = d.stats, proc = d.processing, avg = d.avg_times, labels = d.worker_labels || {};
+
+        // Health stats
+        var hs = {queue: s.impact_unscored, relevant: s.impact_relevant, mentions: s.company_mentions, sent: s.sent_articles};
+        for (var k in hs) { var el = document.getElementById('hs-' + k); if (el) el.textContent = hs[k]; }
+
+        // Pipeline
+        var ps = {ingested: s.total_articles, impact: s.impact_scored, relevant: s.impact_relevant, classified: s.processed_articles, scanned: s.company_scanned, sent: s.sent_articles};
+        for (var k in ps) { var el = document.getElementById('ps-' + k); if (el) el.textContent = ps[k]; }
+
+        // Health dots
+        var dotsEl = document.getElementById('health-dots');
+        if (dotsEl) {
+            var dhtml = '';
+            for (var name in proc) {
+                var st = proc[name];
+                var active = st.article_id ? ' active' : '';
+                var ds = st.started_at ? ' data-started="' + st.started_at + '"' : '';
+                var lbl = labels[name] || name;
+                var avgStr = avg[name] != null ? '<br>avg ' + avg[name] + 's' : '';
+                dhtml += '<div class="health-dot' + active + '" title="' + lbl + '"' + ds + '>'
+                    + '<div class="tooltip"><strong>' + lbl + '</strong>' + avgStr + '</div></div>';
+            }
+            dotsEl.innerHTML = dhtml;
+        }
+
+        // Worker rows
+        var wEl = document.getElementById('worker-rows');
+        if (wEl) {
+            var whtml = '';
+            for (var name in proc) {
+                var st = proc[name];
+                var active = st.article_id ? ' active' : '';
+                var ds = st.started_at ? ' data-started="' + st.started_at + '"' : '';
+                var lbl = labels[name] || name;
+                var activity = st.article_id
+                    ? '#' + st.article_id + ' <span class="elapsed-timer" data-started="' + st.started_at + '"></span>'
+                    : 'idle';
+                var avgStr = avg[name] != null ? '<span class="worker-avg">avg ' + avg[name] + 's</span>' : '';
+                whtml += '<div class="worker-row">'
+                    + '<div class="worker-dot' + active + '"' + ds + '></div>'
+                    + '<span class="worker-name">' + lbl + '</span>'
+                    + '<span class="worker-activity">' + activity + '</span>'
+                    + avgStr + '</div>';
+            }
+            wEl.innerHTML = whtml;
+        }
+    });
+})();
 </script>

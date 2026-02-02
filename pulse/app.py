@@ -389,10 +389,12 @@ async def sse_events(request: Request):
             if await request.is_disconnected():
                 break
             stats = await db.get_stats(_model_count())
+            processing, avg_times = _merge_impact_workers(processing_status, get_worker_avg_times())
             data = {
                 "stats": stats,
-                "processing": processing_status,
-                "avg_times": get_worker_avg_times(),
+                "processing": processing,
+                "avg_times": avg_times,
+                "worker_labels": WORKER_LABELS,
             }
             yield {"event": "update", "data": json.dumps(data)}
             await asyncio.sleep(3)
@@ -401,40 +403,6 @@ async def sse_events(request: Request):
 
 
 # --- HTMX Partials ---
-
-
-@app.get("/partials/stats", response_class=HTMLResponse)
-async def partial_stats(request: Request):
-    stats = await db.get_stats(_model_count())
-    processing, avg_times = _merge_impact_workers(processing_status, get_worker_avg_times())
-    feeds = await db.get_feeds()
-    sentinel_url = await db.get_setting("sentinel_url") or ""
-    prompt_impact = await db.get_setting("prompt_impact") or ""
-    prompt_country = await db.get_setting("prompt_country") or ""
-    prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
-    prompt_company = await db.get_setting("prompt_company") or ""
-    classify_threshold = await db.get_setting("classify_threshold") or "0.5"
-    scan_threshold = await db.get_setting("scan_threshold") or "0.3"
-    validate_threshold = await db.get_setting("validate_threshold") or "0.5"
-    return templates.TemplateResponse(
-        "partials/stats.html",
-        {
-            "request": request,
-            "stats": stats,
-            "processing": processing,
-            "avg_times": avg_times,
-            "worker_labels": WORKER_LABELS,
-            "feeds": feeds,
-            "sentinel_url": sentinel_url,
-            "prompt_impact": prompt_impact,
-            "prompt_country": prompt_country,
-            "prompt_sentiment": prompt_sentiment,
-            "prompt_company": prompt_company,
-            "classify_threshold": classify_threshold,
-            "scan_threshold": scan_threshold,
-            "validate_threshold": validate_threshold,
-        },
-    )
 
 
 @app.get("/partials/system-stats", response_class=HTMLResponse)
