@@ -515,22 +515,6 @@ async def get_stats(model_count: int = 1) -> dict:
 # --- Charts ---
 
 
-async def get_impact_distribution() -> list[dict]:
-    """Return article counts bucketed by impact score (0.05-wide bins)."""
-    db = await get_db()
-    try:
-        cursor = await db.execute("""
-            SELECT ROUND(impact * 20) / 20.0 AS bucket, COUNT(*) AS count
-            FROM articles
-            WHERE impact IS NOT NULL
-            GROUP BY bucket
-            ORDER BY bucket
-        """)
-        return [{"bucket": row[0], "count": row[1]} for row in await cursor.fetchall()]
-    finally:
-        await db.close()
-
-
 async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
     """Return decay-weighted average sentiment for the last 30 days.
 
@@ -538,7 +522,7 @@ async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
     Returns [{label, avg_sentiment, article_count}, ...] sorted by avg_sentiment DESC.
     """
     now = time.time()
-    cutoff = now - 30 * 86400
+    cutoff = now - 90 * 86400
     db = await get_db()
     try:
         if bar_type == "country":

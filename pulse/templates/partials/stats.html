@@ -60,17 +60,14 @@
 
         <!-- Charts (preserved across HTMX swaps) -->
         <div id="charts-card" class="dash-card" hx-preserve="true">
-            <h3>Sentiment by Country (30-day decay-weighted)</h3>
-            <div id="chart-country-bars" style="width:100%;height:300px;"></div>
+            <h3>Sentiment by Country</h3>
+            <div id="chart-country-bars" class="sentiment-bars"></div>
 
-            <h3 style="margin-top:1.5rem;">Sentiment by Industry (30-day decay-weighted)</h3>
-            <div id="chart-industry-bars" style="width:100%;height:300px;"></div>
+            <h3 style="margin-top:1.5rem;">Sentiment by Industry</h3>
+            <div id="chart-industry-bars" class="sentiment-bars"></div>
 
-            <h3 style="margin-top:1.5rem;">Sentiment by Company (30-day decay-weighted)</h3>
-            <div id="chart-company-bars" style="width:100%;height:300px;"></div>
-
-            <h3 style="margin-top:1.5rem;">Impact Distribution</h3>
-            <div id="chart-impact-dist" style="width:100%;height:250px;"></div>
+            <h3 style="margin-top:1.5rem;">Sentiment by Company</h3>
+            <div id="chart-company-bars" class="sentiment-bars"></div>
         </div>
 
         <!-- Feeds (collapsible, preserved across HTMX swaps) -->
@@ -224,107 +221,26 @@
         el.style.animationDelay = '-' + elapsed.toFixed(3) + 's';
     });
 
-    // Init echarts (only once)
-    if (typeof echarts !== 'undefined' && !window._chartsInited) {
+    // Sentiment bar charts (plain CSS)
+    if (!window._chartsInited) {
         window._chartsInited = true;
-        var allCharts = [];
 
-        // Impact distribution chart
-        var distChart = echarts.init(document.getElementById('chart-impact-dist'));
-        distChart.setOption({
-            backgroundColor: 'transparent',
-            textStyle: { color: '#e0e0e8', fontSize: 11 },
-            tooltip: {
-                trigger: 'axis',
-                backgroundColor: '#12121a',
-                borderColor: '#1e1e2e',
-                textStyle: { color: '#e0e0e8', fontSize: 11 },
-                formatter: function(params) {
-                    var p = params[0];
-                    return 'Impact: ' + p.name + '<br>Articles: ' + p.value;
-                }
-            },
-            grid: { top: 10, left: 50, right: 10, bottom: 30 },
-            xAxis: {
-                type: 'category',
-                axisLine: { lineStyle: { color: '#1e1e2e' } },
-                axisLabel: { color: '#8888a0', fontSize: 10 }
-            },
-            yAxis: {
-                type: 'log',
-                min: 1,
-                axisLine: { lineStyle: { color: '#1e1e2e' } },
-                axisLabel: { color: '#8888a0', fontSize: 10 },
-                splitLine: { lineStyle: { color: '#1e1e2e' } }
-            },
-            series: []
-        });
-        allCharts.push(distChart);
-
-        function refreshDistChart() {
-            fetch('/api/charts/impact-distribution').then(function(r) { return r.json(); }).then(function(data) {
-                distChart.setOption({
-                    xAxis: { data: data.map(function(d) { return d.bucket.toFixed(2); }) },
-                    series: [{
-                        type: 'bar',
-                        data: data.map(function(d) { return d.count; }),
-                        color: '#6366f1',
-                        barMaxWidth: 20
-                    }]
-                });
-            });
-        }
-        refreshDistChart();
-        setInterval(refreshDistChart, 30000);
-
-        // Sentiment bar charts
-        var countryBarChart = echarts.init(document.getElementById('chart-country-bars'));
-        var industryBarChart = echarts.init(document.getElementById('chart-industry-bars'));
-        var companyBarChart = echarts.init(document.getElementById('chart-company-bars'));
-        allCharts.push(countryBarChart, industryBarChart, companyBarChart);
-
-        function renderBarChart(chart, data) {
-            var labels = data.map(function(d) { return d.label; });
-            var values = data.map(function(d) { return d.avg_sentiment; });
-            var colors = values.map(function(v) { return v >= 0 ? '#22c55e' : '#ef4444'; });
-            chart.setOption({
-                backgroundColor: 'transparent',
-                textStyle: { color: '#e0e0e8', fontSize: 11 },
-                tooltip: {
-                    trigger: 'axis',
-                    backgroundColor: '#12121a',
-                    borderColor: '#1e1e2e',
-                    textStyle: { color: '#e0e0e8', fontSize: 11 },
-                    formatter: function(params) {
-                        var p = params[0];
-                        var idx = p.dataIndex;
-                        var d = data[idx];
-                        return d.label + '<br>Sentiment: ' + d.avg_sentiment.toFixed(4) + '<br>Articles: ' + d.article_count;
-                    }
-                },
-                grid: { top: 10, left: 100, right: 10, bottom: 20 },
-                yAxis: {
-                    type: 'category',
-                    data: labels,
-                    inverse: true,
-                    axisLine: { lineStyle: { color: '#1e1e2e' } },
-                    axisLabel: { color: '#8888a0', fontSize: 10 }
-                },
-                xAxis: {
-                    type: 'value',
-                    min: -1, max: 1,
-                    axisLine: { lineStyle: { color: '#1e1e2e' } },
-                    axisLabel: { color: '#8888a0', fontSize: 10 },
-                    splitLine: { lineStyle: { color: '#1e1e2e' } }
-                },
-                series: [{
-                    type: 'bar',
-                    data: values.map(function(v, i) {
-                        return { value: v, itemStyle: { color: colors[i] } };
-                    }),
-                    barMaxWidth: 40
-                }]
-            });
+        function renderBarChart(container, data) {
+            var html = '';
+            for (var i = 0; i < data.length; i++) {
+                var d = data[i];
+                var v = d.avg_sentiment;
+                var pct = Math.abs(v) * 50;
+                var color = v >= 0 ? '#22c55e' : '#ef4444';
+                var left = v >= 0 ? '50%' : (50 - pct) + '%';
+                html += '<div class="sbar-row" title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
+                    + '<span class="sbar-label">' + d.label + '</span>'
+                    + '<div class="sbar-track"><div class="sbar-zero"></div>'
+                    + '<div class="sbar-fill" style="left:' + left + ';width:' + pct + '%;background:' + color + '"></div></div>'
+                    + '<span class="sbar-val">' + v.toFixed(3) + '</span>'
+                    + '</div>';
+            }
+            container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
 
         function refreshBarCharts() {
@@ -333,17 +249,14 @@
                 fetch('/api/charts/sentiment-bars?type=industry').then(function(r) { return r.json(); }),
                 fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); })
             ]).then(function(results) {
-                renderBarChart(countryBarChart, results[0]);
-                renderBarChart(industryBarChart, results[1]);
-                renderBarChart(companyBarChart, results[2]);
+                renderBarChart(document.getElementById('chart-country-bars'), results[0]);
+                renderBarChart(document.getElementById('chart-industry-bars'), results[1]);
+                renderBarChart(document.getElementById('chart-company-bars'), results[2]);
             }).catch(function(e) { console.error('Bar chart refresh failed:', e); });
         }
 
         refreshBarCharts();
         setInterval(refreshBarCharts, 30000);
-        window.addEventListener('resize', function() {
-            allCharts.forEach(function(c) { c.resize(); });
-        });
     }
 
     // Load fundus publishers (only if container exists and empty)

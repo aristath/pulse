@@ -253,12 +253,14 @@
 .fundus-pub-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
 .fundus-pub-row .domain { color: var(--text-dim); font-size: 0.7rem; }
 
-/* Charts */
-.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-@media (max-width: 700px) { .charts-grid { grid-template-columns: 1fr; } }
-.chart-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+/* Sentiment bars */
+.sbar-row { display: flex; align-items: center; gap: 0.5rem; padding: 2px 0; }
+.sbar-label { width: 90px; font-size: 0.75rem; color: #8888a0; text-align: right; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbar-track { flex: 1; height: 10px; background: #1e1e2e; border-radius: 3px; position: relative; }
+.sbar-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #333; }
+.sbar-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; transition: width 0.3s, left 0.3s; }
+.sbar-val { width: 52px; font-size: 0.7rem; color: #8888a0; flex-shrink: 0; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
 <div id="stats-area" hx-get="/partials/stats" hx-trigger="every 5s">
     {% include "partials/stats.html" %}
