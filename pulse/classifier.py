@@ -337,6 +337,15 @@ class EnsembleClassifier:
             await save_impact(article["id"], 0.0)
 
         self._clear_model_status(status_key)
+        delay = _thermal_delay()
+        if delay > 0:
+            logger.info(
+                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
+                scorer.name,
+                delay,
+                thermal_throttle["temp"],
+            )
+            await asyncio.sleep(delay)
         return True
 
     async def fetch_aliases(self) -> bool:
