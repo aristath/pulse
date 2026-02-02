@@ -34,6 +34,7 @@ class ModernBERTNLI(BaseModel):
         logger.info("%s loaded on %s", self.name, backend)
 
     DEFAULT_COUNTRY = "This article is about {country}."
+    DEFAULT_SECTOR = "This is relevant to the {sector} sector."
     DEFAULT_SENTIMENT = "This is good news for the {sector} sector in {country}."
 
     def classify(
@@ -43,15 +44,17 @@ class ModernBERTNLI(BaseModel):
         sectors: dict[str, list[str]],
         prompt_country: str = "",
         prompt_sentiment: str = "",
+        prompt_sector: str = "",
     ) -> dict:
         if not is_latin_text(text):
             return {}
 
         text = self.truncate(text, 6000)
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
+        sector_tpl = prompt_sector or self.DEFAULT_SECTOR
         sentiment_tpl = prompt_sentiment or self.DEFAULT_SENTIMENT
 
-        # Pass 1: batch all country hypotheses in one forward pass
+        # Pass 1: country relevance
         country_hypotheses = [country_tpl.format(country=c) for c in countries]
         scores = self._nli_batch(text, country_hypotheses)
         relevant = [c for c, s in zip(countries, scores) if s >= RELEVANCE_THRESHOLD]
@@ -59,10 +62,23 @@ class ModernBERTNLI(BaseModel):
         if not relevant:
             return {}
 
-        # Pass 2: batch all sector hypotheses for relevant countries
+        # Pass 2: sector relevance (once, shared across countries)
+        all_sectors = set()
+        for country in relevant:
+            all_sectors.update(sectors.get(country, sectors.get("global", [])))
+        all_sectors = sorted(all_sectors)
+
+        sector_hypotheses = [sector_tpl.format(sector=s) for s in all_sectors]
+        sector_scores = self._nli_batch(text, sector_hypotheses)
+        relevant_sectors = {s for s, sc in zip(all_sectors, sector_scores) if sc >= RELEVANCE_THRESHOLD}
+
+        if not relevant_sectors:
+            return {}
+
+        # Pass 3: sentiment only for relevant sectors
         signals = {}
         for country in relevant:
-            country_sectors = sectors.get(country, sectors.get("global", []))
+            country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
             if not country_sectors:
                 continue
 

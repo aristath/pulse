@@ -45,6 +45,7 @@ class FinBERT(BaseModel):
         sectors: dict[str, list[str]],
         prompt_country: str = "",
         prompt_sentiment: str = "",
+        prompt_sector: str = "",
     ) -> dict:
         if not is_latin_text(text):
             return {}

@@ -112,6 +112,7 @@ async def dashboard(request: Request):
     prompt_impact = await db.get_setting("prompt_impact") or ""
     prompt_country = await db.get_setting("prompt_country") or ""
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
+    prompt_sector = await db.get_setting("prompt_sector") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
     classify_threshold = await db.get_setting("classify_threshold") or "0.5"
     scan_threshold = await db.get_setting("scan_threshold") or "0.3"
@@ -129,6 +130,7 @@ async def dashboard(request: Request):
             "prompt_impact": prompt_impact,
             "prompt_country": prompt_country,
             "prompt_sentiment": prompt_sentiment,
+            "prompt_sector": prompt_sector,
             "prompt_company": prompt_company,
             "classify_threshold": classify_threshold,
             "scan_threshold": scan_threshold,
@@ -345,6 +347,7 @@ async def api_set_prompts(
     request: Request,
     prompt_impact: str = Form(None),
     prompt_country: str = Form(None),
+    prompt_sector: str = Form(None),
     prompt_sentiment: str = Form(None),
     prompt_company: str = Form(None),
 ):
@@ -352,10 +355,12 @@ async def api_set_prompts(
         body = await request.json()
         prompt_impact = body.get("prompt_impact", "")
         prompt_country = body.get("prompt_country", "")
+        prompt_sector = body.get("prompt_sector", "")
         prompt_sentiment = body.get("prompt_sentiment", "")
         prompt_company = body.get("prompt_company", "")
     await db.set_setting("prompt_impact", (prompt_impact or "").strip())
     await db.set_setting("prompt_country", (prompt_country or "").strip())
+    await db.set_setting("prompt_sector", (prompt_sector or "").strip())
     await db.set_setting("prompt_sentiment", (prompt_sentiment or "").strip())
     await db.set_setting("prompt_company", (prompt_company or "").strip())
     return {"ok": True}

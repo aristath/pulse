@@ -65,6 +65,7 @@ class GLiClassNLI(BaseModel):
         sectors: dict[str, list[str]],
         prompt_country: str = "",
         prompt_sentiment: str = "",
+        prompt_sector: str = "",
     ) -> dict:
         if not is_latin_text(text):
             return {}
@@ -78,10 +79,24 @@ class GLiClassNLI(BaseModel):
         if not relevant:
             return {}
 
-        # Pass 2: sector sentiment per relevant country
+        # Pass 2: sector relevance (once, shared across countries)
+        all_sectors = set()
+        for country in relevant:
+            all_sectors.update(sectors.get(country, sectors.get("global", [])))
+        all_sectors = sorted(all_sectors)
+
+        sector_tpl = prompt_sector or "This is relevant to the {sector} sector"
+        sector_labels = [sector_tpl.format(sector=s) for s in all_sectors]
+        sector_scores = self._infer(text, sector_labels)
+        relevant_sectors = {s for s, sc in zip(all_sectors, sector_scores) if sc >= RELEVANCE_THRESHOLD}
+
+        if not relevant_sectors:
+            return {}
+
+        # Pass 3: sentiment only for relevant sectors
         signals: dict = {}
         for country in relevant:
-            country_sectors = sectors.get(country, sectors.get("global", []))
+            country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
             if not country_sectors:
                 continue
 

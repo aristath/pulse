@@ -89,11 +89,13 @@ class BaseModel(ABC):
         sectors: dict[str, list[str]],
         prompt_country: str = "",
         prompt_sentiment: str = "",
+        prompt_sector: str = "",
     ) -> dict[str, dict[str, float]]:
         """
-        Two-pass classification:
+        Three-pass classification:
         1. Determine relevant countries from `countries` list.
-        2. For each relevant country, classify sentiment per sector.
+        2. Determine relevant sectors.
+        3. For each relevant country, classify sentiment per relevant sector.
 
         Args:
             text: Article content.
@@ -101,6 +103,7 @@ class BaseModel(ABC):
             sectors: Dict mapping country to list of sector names.
             prompt_country: Template for country relevance, with {country} placeholder.
             prompt_sentiment: Template for sentiment, with {sector} and {country} placeholders.
+            prompt_sector: Template for sector relevance, with {sector} placeholder.
 
         Returns:
             Nested dict: {country: {sector: sentiment_score}}.

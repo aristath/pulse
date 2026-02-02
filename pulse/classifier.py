@@ -233,6 +233,7 @@ class EnsembleClassifier:
         # Fetch configurable prompts
         prompt_country = await get_setting("prompt_country") or ""
         prompt_sentiment = await get_setting("prompt_sentiment") or ""
+        prompt_sector = await get_setting("prompt_sector") or ""
 
         status_key = f"classify:{model_name}"
         processing_status[status_key] = {
@@ -262,6 +263,7 @@ class EnsembleClassifier:
                     self._sectors,
                     prompt_country,
                     prompt_sentiment,
+                    prompt_sector,
                 ),
                 timeout=300,
             )
