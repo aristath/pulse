@@ -63,33 +63,14 @@
             <h3>Impact Distribution</h3>
             <div id="chart-impact-dist" style="width:100%;height:250px;"></div>
 
-            <h3 style="margin-top:1.5rem;">Sentiment Charts
-                <span class="period-switch" style="float:right;font-size:0.75rem;font-weight:400;">
-                    <button class="period-btn active" data-period="3m">3M</button>
-                    <button class="period-btn" data-period="6m">6M</button>
-                    <button class="period-btn" data-period="1y">1Y</button>
-                </span>
-            </h3>
-            <!-- Summary row -->
-            <div class="charts-grid">
-                <div>
-                    <div class="chart-label">By Country</div>
-                    <div id="chart-country" style="width:100%;height:280px;"></div>
-                </div>
-                <div>
-                    <div class="chart-label">By Industry</div>
-                    <div id="chart-industry" style="width:100%;height:280px;"></div>
-                </div>
-            </div>
-            <!-- Dynamic per-industry charts -->
-            <div class="chart-label" style="margin-top:1rem;">By Industry (per country)</div>
-            <div id="industry-charts" class="charts-grid"></div>
-            <!-- Dynamic per-country charts -->
-            <div class="chart-label" style="margin-top:1rem;">By Country (per industry)</div>
-            <div id="country-charts" class="charts-grid"></div>
-            <!-- Dynamic per-company charts -->
-            <div class="chart-label" style="margin-top:1rem;">By Company</div>
-            <div id="company-charts" class="charts-grid"></div>
+            <h3 style="margin-top:1.5rem;">Sentiment by Country (30-day decay-weighted)</h3>
+            <div id="chart-country-bars" style="width:100%;height:300px;"></div>
+
+            <h3 style="margin-top:1.5rem;">Sentiment by Industry (30-day decay-weighted)</h3>
+            <div id="chart-industry-bars" style="width:100%;height:300px;"></div>
+
+            <h3 style="margin-top:1.5rem;">Sentiment by Company (30-day decay-weighted)</h3>
+            <div id="chart-company-bars" style="width:100%;height:300px;"></div>
         </div>
 
         <!-- Feeds (collapsible, preserved across HTMX swaps) -->
@@ -246,88 +227,7 @@
     // Init echarts (only once)
     if (typeof echarts !== 'undefined' && !window._chartsInited) {
         window._chartsInited = true;
-        var COLORS = [
-            '#6366f1', '#22c55e', '#eab308', '#ef4444', '#3b82f6',
-            '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'
-        ];
         var allCharts = [];
-
-        function chartBaseOpts() {
-            return {
-                backgroundColor: 'transparent',
-                textStyle: { color: '#e0e0e8', fontSize: 11 },
-                tooltip: {
-                    trigger: 'axis',
-                    backgroundColor: '#12121a',
-                    borderColor: '#1e1e2e',
-                    textStyle: { color: '#e0e0e8', fontSize: 11 }
-                },
-                legend: {
-                    type: 'scroll',
-                    textStyle: { color: '#8888a0', fontSize: 10 },
-                    pageTextStyle: { color: '#8888a0' },
-                    top: 0
-                },
-                grid: { top: 40, left: 50, right: 10, bottom: 55 },
-                xAxis: {
-                    type: 'time',
-                    axisLine: { lineStyle: { color: '#1e1e2e' } },
-                    axisLabel: { color: '#8888a0', fontSize: 10 }
-                },
-                yAxis: {
-                    type: 'value', name: 'Sentiment',
-                    nameTextStyle: { color: '#8888a0', fontSize: 10 },
-                    axisLine: { lineStyle: { color: '#1e1e2e' } },
-                    axisLabel: { color: '#8888a0', fontSize: 10 },
-                    splitLine: { lineStyle: { color: '#1e1e2e' } }
-                },
-                dataZoom: [
-                    { type: 'inside', start: 0, end: 100 },
-                    {
-                        type: 'slider', start: 0, end: 100, height: 18,
-                        borderColor: '#1e1e2e', backgroundColor: '#0a0a0f',
-                        fillerColor: 'rgba(99,102,241,0.15)',
-                        textStyle: { color: '#8888a0', fontSize: 9 },
-                        handleStyle: { color: '#6366f1' }
-                    }
-                ],
-                series: []
-            };
-        }
-
-        function chartBuildSeries(rows, labelKey) {
-            var groups = {};
-            for (var k = 0; k < rows.length; k++) {
-                var r = rows[k];
-                var key = r[labelKey];
-                if (!groups[key]) groups[key] = [];
-                groups[key].push([r.day, r.avg_sentiment]);
-            }
-            return Object.keys(groups).sort().map(function(label, i) {
-                return {
-                    name: label, type: 'line', data: groups[label],
-                    connectNulls: true, smooth: true, symbol: 'none',
-                    lineStyle: { width: 2 }, color: COLORS[i % COLORS.length]
-                };
-            });
-        }
-
-        function createMiniChart(container, title) {
-            var wrapper = document.createElement('div');
-            var lbl = document.createElement('div');
-            lbl.className = 'chart-label';
-            lbl.textContent = title;
-            wrapper.appendChild(lbl);
-            var div = document.createElement('div');
-            div.style.width = '100%';
-            div.style.height = '240px';
-            wrapper.appendChild(div);
-            container.appendChild(wrapper);
-            var chart = echarts.init(div);
-            chart.setOption(chartBaseOpts());
-            allCharts.push(chart);
-            return chart;
-        }
 
         // Impact distribution chart
         var distChart = echarts.init(document.getElementById('chart-impact-dist'));
@@ -377,104 +277,69 @@
         refreshDistChart();
         setInterval(refreshDistChart, 30000);
 
-        // Summary charts
-        var cChart = echarts.init(document.getElementById('chart-country'));
-        var iChart = echarts.init(document.getElementById('chart-industry'));
-        cChart.setOption(chartBaseOpts());
-        iChart.setOption(chartBaseOpts());
-        allCharts.push(cChart, iChart);
+        // Sentiment bar charts
+        var countryBarChart = echarts.init(document.getElementById('chart-country-bars'));
+        var industryBarChart = echarts.init(document.getElementById('chart-industry-bars'));
+        var companyBarChart = echarts.init(document.getElementById('chart-company-bars'));
+        allCharts.push(countryBarChart, industryBarChart, companyBarChart);
 
-        // Dynamic chart registries
-        var industryCharts = {};
-        var countryCharts = {};
-        var companyCharts = {};
-        var chartPeriod = '3m';
-
-        // Period switcher
-        document.querySelectorAll('.period-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
-                btn.classList.add('active');
-                chartPeriod = btn.dataset.period;
-                refreshCharts();
+        function renderBarChart(chart, data) {
+            var labels = data.map(function(d) { return d.label; });
+            var values = data.map(function(d) { return d.avg_sentiment; });
+            var colors = values.map(function(v) { return v >= 0 ? '#22c55e' : '#ef4444'; });
+            chart.setOption({
+                backgroundColor: 'transparent',
+                textStyle: { color: '#e0e0e8', fontSize: 11 },
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: '#12121a',
+                    borderColor: '#1e1e2e',
+                    textStyle: { color: '#e0e0e8', fontSize: 11 },
+                    formatter: function(params) {
+                        var p = params[0];
+                        var idx = p.dataIndex;
+                        var d = data[idx];
+                        return d.label + '<br>Sentiment: ' + d.avg_sentiment.toFixed(4) + '<br>Articles: ' + d.article_count;
+                    }
+                },
+                grid: { top: 10, left: 50, right: 10, bottom: 80 },
+                xAxis: {
+                    type: 'category',
+                    data: labels,
+                    axisLine: { lineStyle: { color: '#1e1e2e' } },
+                    axisLabel: { color: '#8888a0', fontSize: 10, rotate: labels.length > 8 ? 45 : 0 }
+                },
+                yAxis: {
+                    type: 'value',
+                    min: -1, max: 1,
+                    axisLine: { lineStyle: { color: '#1e1e2e' } },
+                    axisLabel: { color: '#8888a0', fontSize: 10 },
+                    splitLine: { lineStyle: { color: '#1e1e2e' } }
+                },
+                series: [{
+                    type: 'bar',
+                    data: values.map(function(v, i) {
+                        return { value: v, itemStyle: { color: colors[i] } };
+                    }),
+                    barMaxWidth: 40
+                }]
             });
-        });
-
-        function refreshCharts() {
-            var p = chartPeriod;
-            Promise.all([
-                fetch('/api/charts/timeseries?group_by=country&period=' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/timeseries?group_by=industry&period=' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/detailed?period=' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/companies?period=' + p).then(function(r) { return r.json(); })
-            ]).then(function(results) {
-                var cData = results[0], iData = results[1], dData = results[2], coData = results[3];
-
-                // Summary
-                cChart.setOption({ series: chartBuildSeries(cData, 'label') });
-                iChart.setOption({ series: chartBuildSeries(iData, 'label') });
-
-                // Group detailed data
-                var byIndustry = {}, byCountry = {};
-                for (var d = 0; d < dData.length; d++) {
-                    var r = dData[d];
-                    if (!byIndustry[r.industry]) byIndustry[r.industry] = [];
-                    byIndustry[r.industry].push(r);
-                    if (!byCountry[r.country]) byCountry[r.country] = [];
-                    byCountry[r.country].push(r);
-                }
-
-                // Per-industry charts
-                var iContainer = document.getElementById('industry-charts');
-                var industries = Object.keys(byIndustry).sort();
-                for (var ii = 0; ii < industries.length; ii++) {
-                    var ind = industries[ii];
-                    if (!industryCharts[ind]) {
-                        industryCharts[ind] = createMiniChart(iContainer, ind);
-                    }
-                    industryCharts[ind].setOption({ series: chartBuildSeries(byIndustry[ind], 'country') });
-                }
-
-                // Per-country charts
-                var cContainer = document.getElementById('country-charts');
-                var countries = Object.keys(byCountry).sort();
-                for (var ci = 0; ci < countries.length; ci++) {
-                    var cty = countries[ci];
-                    if (!countryCharts[cty]) {
-                        countryCharts[cty] = createMiniChart(cContainer, cty);
-                    }
-                    countryCharts[cty].setOption({ series: chartBuildSeries(byCountry[cty], 'industry') });
-                }
-
-                // Per-company charts — group by ticker
-                var byCompany = {};
-                for (var j = 0; j < coData.length; j++) {
-                    var cr = coData[j];
-                    if (!byCompany[cr.label]) byCompany[cr.label] = [];
-                    byCompany[cr.label].push(cr);
-                }
-                var coContainer = document.getElementById('company-charts');
-                var tickers = Object.keys(byCompany).sort();
-                for (var ti = 0; ti < tickers.length; ti++) {
-                    var tk = tickers[ti];
-                    if (!companyCharts[tk]) {
-                        companyCharts[tk] = createMiniChart(coContainer, tk);
-                    }
-                    // Single-series per company
-                    companyCharts[tk].setOption({
-                        series: [{
-                            name: tk, type: 'line',
-                            data: byCompany[tk].map(function(p) { return [p.day, p.avg_sentiment]; }),
-                            connectNulls: true, smooth: true, symbol: 'none',
-                            lineStyle: { width: 2 }, color: COLORS[ti % COLORS.length]
-                        }]
-                    });
-                }
-            }).catch(function(e) { console.error('Chart refresh failed:', e); });
         }
 
-        refreshCharts();
-        setInterval(refreshCharts, 30000);
+        function refreshBarCharts() {
+            Promise.all([
+                fetch('/api/charts/sentiment-bars?type=country').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=industry').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); })
+            ]).then(function(results) {
+                renderBarChart(countryBarChart, results[0]);
+                renderBarChart(industryBarChart, results[1]);
+                renderBarChart(companyBarChart, results[2]);
+            }).catch(function(e) { console.error('Bar chart refresh failed:', e); });
+        }
+
+        refreshBarCharts();
+        setInterval(refreshBarCharts, 30000);
         window.addEventListener('resize', function() {
             allCharts.forEach(function(c) { c.resize(); });
         });

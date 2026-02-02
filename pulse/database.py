@@ -1,5 +1,7 @@
 import json
 import logging
+import math
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -529,108 +531,93 @@ async def get_impact_distribution() -> list[dict]:
         await db.close()
 
 
-def _date_bucket_expr(col: str, period: str) -> str:
-    """Return a SQL expression that buckets a unix-timestamp column by period."""
-    u = f"{col}, 'unixepoch'"
-    if period == "6m":
-        return (
-            f"CASE WHEN CAST(strftime('%m', {u}) AS INTEGER) <= 6 "
-            f"THEN strftime('%Y', {u}) || '-01-01' "
-            f"ELSE strftime('%Y', {u}) || '-07-01' END"
-        )
-    if period == "1y":
-        return f"strftime('%Y', {u}) || '-01-01'"
-    # Default: 3m (quarterly)
-    return (
-        f"CASE ((CAST(strftime('%m', {u}) AS INTEGER) - 1) / 3) "
-        f"WHEN 0 THEN strftime('%Y', {u}) || '-01-01' "
-        f"WHEN 1 THEN strftime('%Y', {u}) || '-04-01' "
-        f"WHEN 2 THEN strftime('%Y', {u}) || '-07-01' "
-        f"WHEN 3 THEN strftime('%Y', {u}) || '-10-01' END"
-    )
+async def get_sentiment_bars(bar_type: str, threshold: float) -> list[dict]:
+    """Return decay-weighted average sentiment for the last 30 days.
 
-
-async def get_sentiment_timeseries(group_by: str, period: str = "3m") -> list[dict]:
-    """Get sentiment averaged over time, grouped by country or industry.
-
-    Args:
-        group_by: "country" groups by country key, "industry" groups by sector key.
+    weight = exp(-0.1 * age_days) — today=1.0, 7d~0.50, 14d~0.25, 30d~0.05.
+    Returns [{label, avg_sentiment, article_count}, ...] sorted by avg_sentiment DESC.
     """
-    if group_by == "country":
-        label_expr = "country.key"
-    elif group_by == "industry":
-        label_expr = "sector.key"
-    else:
-        raise ValueError(f"group_by must be 'country' or 'industry', got {group_by!r}")
-
-    bucket = _date_bucket_expr("a.published_at", period)
-    sql = f"""
-        SELECT {bucket} as day,
-               {label_expr} as label,
-               SUM(CAST(sector.value AS REAL) * COALESCE(a.impact, 0)) / MAX(SUM(a.impact), 1) as avg_sentiment
-        FROM results r
-        JOIN articles a ON r.article_id = a.id,
-             json_each(r.signals) as country,
-             json_each(country.value) as sector
-        WHERE a.published_at IS NOT NULL AND r.signals != '{{}}' AND a.impact IS NOT NULL
-        GROUP BY day, label
-        ORDER BY day
-    """
+    now = time.time()
+    cutoff = now - 30 * 86400
     db = await get_db()
     try:
-        cursor = await db.execute(sql)
+        if bar_type == "country":
+            cursor = await db.execute(
+                """
+                SELECT r.article_id, country.key AS label,
+                       AVG(CAST(sector.value AS REAL)) AS sentiment,
+                       a.published_at
+                FROM results r
+                JOIN articles a ON r.article_id = a.id,
+                     json_each(r.signals) AS country,
+                     json_each(country.value) AS sector
+                WHERE a.published_at >= ?
+                  AND a.impact IS NOT NULL AND a.impact >= ?
+                  AND r.signals != '{}'
+                GROUP BY r.article_id, country.key
+                """,
+                (cutoff, threshold),
+            )
+        elif bar_type == "industry":
+            cursor = await db.execute(
+                """
+                SELECT r.article_id, sector.key AS label,
+                       AVG(CAST(sector.value AS REAL)) AS sentiment,
+                       a.published_at
+                FROM results r
+                JOIN articles a ON r.article_id = a.id,
+                     json_each(r.signals) AS country,
+                     json_each(country.value) AS sector
+                WHERE a.published_at >= ?
+                  AND a.impact IS NOT NULL AND a.impact >= ?
+                  AND r.signals != '{}'
+                GROUP BY r.article_id, sector.key
+                """,
+                (cutoff, threshold),
+            )
+        elif bar_type == "company":
+            cursor = await db.execute(
+                """
+                SELECT cr.article_id, cr.ticker AS label,
+                       cr.sentiment, a.published_at
+                FROM company_results cr
+                JOIN articles a ON cr.article_id = a.id
+                WHERE a.published_at >= ?
+                  AND cr.sentiment IS NOT NULL
+                """,
+                (cutoff,),
+            )
+        else:
+            raise ValueError(f"bar_type must be 'country', 'industry', or 'company', got {bar_type!r}")
+
         rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
     finally:
         await db.close()
 
+    # Group by label and compute decay-weighted average
+    groups: dict[str, list[tuple[float, float]]] = {}
+    for row in rows:
+        label = row["label"]
+        pub = row["published_at"]
+        if pub is None:
+            continue
+        age_days = (now - float(pub)) / 86400
+        weight = math.exp(-0.1 * age_days)
+        groups.setdefault(label, []).append((row["sentiment"], weight))
 
-async def get_sentiment_detailed(period: str = "3m") -> list[dict]:
-    """Get sentiment by day, country, and industry."""
-    bucket = _date_bucket_expr("a.published_at", period)
-    sql = f"""
-        SELECT {bucket} as day,
-               country.key as country,
-               sector.key as industry,
-               SUM(CAST(sector.value AS REAL) * COALESCE(a.impact, 0)) / MAX(SUM(a.impact), 1) as avg_sentiment
-        FROM results r
-        JOIN articles a ON r.article_id = a.id,
-             json_each(r.signals) as country,
-             json_each(country.value) as sector
-        WHERE a.published_at IS NOT NULL AND r.signals != '{{}}' AND a.impact IS NOT NULL
-        GROUP BY day, country, industry
-        ORDER BY day
-    """
-    db = await get_db()
-    try:
-        cursor = await db.execute(sql)
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        await db.close()
-
-
-async def get_company_sentiment_timeseries(period: str = "3m") -> list[dict]:
-    """Get company sentiment over time, grouped by ticker."""
-    bucket = _date_bucket_expr("a.published_at", period)
-    sql = f"""
-        SELECT {bucket} as day,
-               cr.ticker as label,
-               AVG(cr.sentiment) as avg_sentiment
-        FROM company_results cr
-        JOIN articles a ON cr.article_id = a.id
-        WHERE a.published_at IS NOT NULL
-          AND cr.sentiment IS NOT NULL
-        GROUP BY day, cr.ticker
-        ORDER BY day
-    """
-    db = await get_db()
-    try:
-        cursor = await db.execute(sql)
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        await db.close()
+    result = []
+    for label, entries in groups.items():
+        total_weight = sum(w for _, w in entries)
+        if total_weight == 0:
+            continue
+        avg = sum(s * w for s, w in entries) / total_weight
+        result.append({
+            "label": label,
+            "avg_sentiment": avg,
+            "article_count": len(entries),
+        })
+    result.sort(key=lambda x: x["avg_sentiment"], reverse=True)
+    return result
 
 
 # --- Settings ---

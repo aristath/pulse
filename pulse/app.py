@@ -211,27 +211,12 @@ async def api_charts_impact_distribution():
     return await db.get_impact_distribution()
 
 
-@app.get("/api/charts/timeseries")
-async def api_charts_timeseries(group_by: str = "country", period: str = "3m"):
-    if group_by not in ("country", "industry"):
-        raise HTTPException(400, "group_by must be 'country' or 'industry'")
-    if period not in ("3m", "6m", "1y"):
-        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
-    return await db.get_sentiment_timeseries(group_by, period)
-
-
-@app.get("/api/charts/detailed")
-async def api_charts_detailed(period: str = "3m"):
-    if period not in ("3m", "6m", "1y"):
-        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
-    return await db.get_sentiment_detailed(period)
-
-
-@app.get("/api/charts/companies")
-async def api_charts_companies(period: str = "3m"):
-    if period not in ("3m", "6m", "1y"):
-        raise HTTPException(400, "period must be '3m', '6m', or '1y'")
-    return await db.get_company_sentiment_timeseries(period)
+@app.get("/api/charts/sentiment-bars")
+async def api_charts_sentiment_bars(type: str = "country"):
+    if type not in ("country", "industry", "company"):
+        raise HTTPException(400, "type must be 'country', 'industry', or 'company'")
+    threshold = float(await db.get_setting("classify_threshold") or "0.5")
+    return await db.get_sentiment_bars(type, threshold)
 
 
 @app.get("/api/stats")
