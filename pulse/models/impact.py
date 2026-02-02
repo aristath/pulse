@@ -1,4 +1,5 @@
 import logging
+import math
 import threading
 import torch
 from transformers import AutoTokenizer
@@ -61,8 +62,8 @@ class ImpactScorer:
         hypothesis = hypothesis or DEFAULT_HYPOTHESIS
 
         words = text.split()
-        if len(words) > 6000:
-            text = " ".join(words[:6000])
+        if len(words) > 2000:
+            text = " ".join(words[:2000])
 
         inputs = self._tokenizer(
             text,
@@ -81,4 +82,7 @@ class ImpactScorer:
                 logits = self._model(**inputs).logits
         probs = torch.softmax(logits, dim=-1)
         # ModernBERT zeroshot v2.0: 2-class (0=entailment, 1=not_entailment)
-        return round(probs[0, 0].item(), 4)
+        score = probs[0, 0].item()
+        if math.isnan(score):
+            return 0.0
+        return round(score, 4)
