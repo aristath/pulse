@@ -92,27 +92,43 @@
 }
 
 /* Pipeline flow */
-.pipeline {
-    display: flex;
-    align-items: center;
+.pipeline-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
     gap: 0;
-    flex-wrap: wrap;
-}
-.pipeline-stage {
     text-align: center;
+}
+.pipeline-grid .pg-cell {
     font-size: 0.75rem;
     color: var(--text-dim);
+    position: relative;
+    padding: 0 0.2rem;
 }
-.pipeline-stage .count {
+.pipeline-grid .pg-cell:not(:last-child)::after {
+    content: '\2192';
+    position: absolute;
+    right: -0.15rem;
+    top: 0.45rem;
+    color: var(--border);
+    font-size: 0.9rem;
+}
+.pipeline-grid .pg-cell .count {
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--text);
     display: block;
 }
-.pipeline-arrow {
-    color: var(--border);
-    font-size: 0.9rem;
-    padding: 0 0.4rem;
+.pipeline-grid .pg-pending {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    opacity: 0.6;
+    padding-top: 0.15rem;
+}
+.pipeline-grid .pg-pending .count {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    display: block;
 }
 
 /* Workers panel */

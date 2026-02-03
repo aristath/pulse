@@ -25,77 +25,51 @@
         <!-- Pipeline Flow -->
         <div class="dash-card">
             <h3>Pipeline Flow</h3>
-            <div class="pipeline">
-                <div class="pipeline-stage">
+            <div class="pipeline-grid">
+                <div class="pg-cell">
                     <span class="count" id="ps-ingested">{{ stats.total_articles }}</span>
                     Ingested
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-impact">{{ stats.impact_scored }}</span>
                     Impact Scored
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-relevant">{{ stats.impact_relevant }}</span>
                     Relevant
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-classified">{{ stats.processed_articles }}</span>
                     NLI Classified
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-filtered">{{ stats.impact_filtered }}</span>
                     Filtered
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-scanned">{{ stats.company_scanned }}</span>
                     Co. Scanned
                 </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-stage">
+                <div class="pg-cell">
                     <span class="count" id="ps-sent">{{ stats.sent_articles }}</span>
                     Sent
                 </div>
-            </div>
-            <div class="pipeline" style="margin-top:0.25rem;opacity:0.6;font-size:0.85em;">
-                <div class="pipeline-stage">
-                    <span class="count" id="pp-ingested">&nbsp;</span>
-                    &nbsp;
-                </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
+                <div class="pg-pending">&nbsp;</div>
+                <div class="pg-pending">
                     <span class="count" id="pp-impact">{{ stats.impact_unscored }}</span>
                     pending
                 </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
-                    <span class="count" id="pp-relevant">&nbsp;</span>
-                    &nbsp;
-                </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
+                <div class="pg-pending">&nbsp;</div>
+                <div class="pg-pending">
                     <span class="count" id="pp-classified">{{ stats.impact_relevant - stats.processed_articles }}</span>
                     pending
                 </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
-                    <span class="count" id="pp-filtered">&nbsp;</span>
-                    &nbsp;
-                </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
+                <div class="pg-pending">&nbsp;</div>
+                <div class="pg-pending">
                     <span class="count" id="pp-scanned">{{ stats.scan_eligible - stats.company_scanned }}</span>
                     pending
                 </div>
-                <span class="pipeline-arrow">&nbsp;</span>
-                <div class="pipeline-stage">
-                    <span class="count" id="pp-sent">&nbsp;</span>
-                    &nbsp;
-                </div>
+                <div class="pg-pending">&nbsp;</div>
             </div>
         </div>
 
