@@ -47,6 +47,11 @@
                 </div>
                 <span class="pipeline-arrow">&rarr;</span>
                 <div class="pipeline-stage">
+                    <span class="count" id="ps-filtered">{{ stats.impact_filtered }}</span>
+                    Filtered
+                </div>
+                <span class="pipeline-arrow">&rarr;</span>
+                <div class="pipeline-stage">
                     <span class="count" id="ps-scanned">{{ stats.company_scanned }}</span>
                     Co. Scanned
                 </div>
@@ -467,7 +472,7 @@ function triggerFundusCrawl(btn) {
         for (var k in hs) { var el = document.getElementById('hs-' + k); if (el) el.textContent = hs[k]; }
 
         // Pipeline
-        var ps = {ingested: s.total_articles, impact: s.impact_scored, relevant: s.impact_relevant, classified: s.processed_articles, scanned: s.company_scanned, sent: s.sent_articles};
+        var ps = {ingested: s.total_articles, impact: s.impact_scored, relevant: s.impact_relevant, classified: s.processed_articles, filtered: s.impact_filtered, scanned: s.company_scanned, sent: s.sent_articles};
         for (var k in ps) { var el = document.getElementById('ps-' + k); if (el) el.textContent = ps[k]; }
 
         // Health dots

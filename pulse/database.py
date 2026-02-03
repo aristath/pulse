@@ -435,6 +435,13 @@ async def get_stats(model_count: int = 1) -> dict:
                 )
             ).fetchone()
         )[0]
+        impact_filtered = (
+            await (
+                await db.execute(
+                    "SELECT COUNT(DISTINCT article_id) FROM results WHERE signals != '{}'",
+                )
+            ).fetchone()
+        )[0]
 
         # Company scan stats
         scan_threshold = float(await get_setting("scan_threshold") or "0.3")
@@ -503,6 +510,7 @@ async def get_stats(model_count: int = 1) -> dict:
             "per_worker": per_worker,
             "impact_scored": impact_scored,
             "impact_relevant": impact_relevant,
+            "impact_filtered": impact_filtered,
             "impact_unscored": total - impact_scored,
             "company_scanned": company_scanned,
             "company_mentions": company_mentions,
