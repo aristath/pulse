@@ -4,7 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pulse.fetcher import fetch_all_feeds
 from pulse.classifier import ensemble
 from pulse.fundus_crawler import crawl_enabled_publishers
-from pulse.database import clear_processed_content
+from pulse.database import clear_processed_content, prune_low_impact_articles
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,16 @@ async def _cleanup_content_job():
         logger.exception("Content cleanup job failed")
 
 
+async def _prune_articles_job():
+    """Scheduled job: delete low-impact articles older than 5 days."""
+    try:
+        deleted = await prune_low_impact_articles()
+        if deleted:
+            logger.info("Pruned %d low-impact articles", deleted)
+    except Exception:
+        logger.exception("Article prune job failed")
+
+
 def start_scheduler():
     """Configure and start the APScheduler."""
     scheduler.add_job(
@@ -86,6 +96,13 @@ def start_scheduler():
         minutes=30,
         id="cleanup_content",
         name="Content cleanup",
+    )
+    scheduler.add_job(
+        _prune_articles_job,
+        "interval",
+        hours=1,
+        id="prune_articles",
+        name="Prune low-impact articles",
     )
     scheduler.start()
     logger.info("Scheduler started")

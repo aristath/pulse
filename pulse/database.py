@@ -516,6 +516,7 @@ async def get_stats(model_count: int = 1) -> dict:
             "scan_eligible": scan_eligible,
             "company_mentions": company_mentions,
             "company_scored": company_scored,
+            "pruned_articles": int(await get_setting("pruned_articles") or "0"),
         }
     finally:
         await db.close()
@@ -949,6 +950,41 @@ async def set_setting(key: str, value: str):
             (key, value),
         )
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def prune_low_impact_articles() -> int:
+    """Delete articles with impact < 0.3 that are older than 5 days.
+
+    Also removes related results and company_results rows.
+    Returns the number of articles deleted.
+    """
+    import time
+    cutoff = time.time() - 5 * 86400
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id FROM articles
+               WHERE impact IS NOT NULL AND impact < 0.3
+                 AND published_at IS NOT NULL AND published_at < ?""",
+            (cutoff,),
+        )
+        ids = [row[0] for row in await cursor.fetchall()]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        await db.execute(f"DELETE FROM results WHERE article_id IN ({placeholders})", ids)
+        await db.execute(f"DELETE FROM company_results WHERE article_id IN ({placeholders})", ids)
+        await db.execute(f"DELETE FROM articles WHERE id IN ({placeholders})", ids)
+        # Update persistent counter
+        prev = int(await get_setting("pruned_articles") or "0")
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            ("pruned_articles", str(prev + len(ids))),
+        )
+        await db.commit()
+        return len(ids)
     finally:
         await db.close()
 

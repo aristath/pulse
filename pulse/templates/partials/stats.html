@@ -54,7 +54,10 @@
                     <span class="count" id="ps-sent">{{ stats.sent_articles }}</span>
                     Sent
                 </div>
-                <div class="pg-pending">&nbsp;</div>
+                <div class="pg-pending">
+                    <span class="count" id="pp-pruned">{{ stats.pruned_articles }}</span>
+                    pruned
+                </div>
                 <div class="pg-pending">
                     <span class="count" id="pp-impact">{{ stats.impact_unscored }}</span>
                     pending
@@ -484,7 +487,7 @@ function triggerFundusCrawl(btn) {
         // Pipeline
         var ps = {ingested: s.total_articles, impact: s.impact_scored, relevant: s.impact_relevant, classified: s.processed_articles, filtered: s.impact_filtered, scanned: s.company_scanned, sent: s.sent_articles};
         for (var k in ps) { var el = document.getElementById('ps-' + k); if (el) el.textContent = ps[k]; }
-        var pp = {impact: s.impact_unscored, classified: s.impact_relevant - s.processed_articles, scanned: s.scan_eligible - s.company_scanned};
+        var pp = {pruned: s.pruned_articles, impact: s.impact_unscored, classified: s.impact_relevant - s.processed_articles, scanned: s.scan_eligible - s.company_scanned};
         for (var k in pp) { var el = document.getElementById('pp-' + k); if (el) el.textContent = pp[k]; }
 
         // Health dots
