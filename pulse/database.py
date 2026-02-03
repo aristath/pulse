@@ -513,6 +513,7 @@ async def get_stats(model_count: int = 1) -> dict:
             "impact_filtered": impact_filtered,
             "impact_unscored": total - impact_scored,
             "company_scanned": company_scanned,
+            "scan_eligible": scan_eligible,
             "company_mentions": company_mentions,
             "company_scored": company_scored,
         }
