@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 MODEL_ID = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
 RELEVANCE_THRESHOLD = 0.5
-SENTIMENT_THRESHOLD = 0.3
 MAX_LENGTH = 512
 CHUNK_SIZE = 400  # words per chunk (DeBERTa max 512 tokens)
 
@@ -96,10 +95,9 @@ class DeBERTaNLI(BaseModel):
 
             country_signals = {}
             for sector, pos, neg in zip(country_sectors, pos_scores, neg_scores):
-                if pos >= SENTIMENT_THRESHOLD or neg >= SENTIMENT_THRESHOLD:
-                    sentiment = round(pos - neg, 4)
-                    sentiment = max(-1.0, min(1.0, sentiment))
-                    country_signals[sector] = sentiment
+                sentiment = round(pos - neg, 4)
+                sentiment = max(-1.0, min(1.0, sentiment))
+                country_signals[sector] = sentiment
 
             if country_signals:
                 signals[country.lower()] = country_signals
@@ -145,19 +143,3 @@ class DeBERTaNLI(BaseModel):
             scores.append(0.0 if math.isnan(score) else score)
         return scores
 
-    def _nli_batch_full(
-        self, premise: str, hypotheses: list[str]
-    ) -> tuple[list[float], list[float]]:
-        """Return (entailment_scores, contradiction_scores), one hypothesis at a time."""
-        entail, contra = [], []
-        for hyp in hypotheses:
-            inputs = self._tokenizer(
-                premise, hyp, return_tensors="pt", truncation=True,
-                padding="max_length", max_length=MAX_LENGTH,
-            )
-            probs = torch.softmax(self._infer(inputs), dim=-1)
-            e = probs[0, 0].item()
-            c = probs[0, 1].item()
-            entail.append(0.0 if math.isnan(e) else e)
-            contra.append(0.0 if math.isnan(c) else c)
-        return entail, contra
