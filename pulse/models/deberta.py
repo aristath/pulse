@@ -39,8 +39,8 @@ class DeBERTaNLI(BaseModel):
 
     DEFAULT_COUNTRY = "This article is about {country}."
     DEFAULT_SECTOR = "This is relevant to the {sector} sector."
-    DEFAULT_SENTIMENT_POS = "This is positive for the {sector} sector in {country}."
-    DEFAULT_SENTIMENT_NEG = "This is negative for the {sector} sector in {country}."
+    DEFAULT_SENTIMENT_POS = "This text is about positive news for the {sector} sector."
+    DEFAULT_SENTIMENT_NEG = "This text is about negative news for the {sector} sector."
 
     def classify(
         self,
@@ -77,30 +77,23 @@ class DeBERTaNLI(BaseModel):
         if not relevant_sectors:
             return {}
 
-        # Pass 3: sentiment via separate positive/negative hypotheses
-        # (2-class NLI: entailment vs not_entailment — need two hypotheses
-        #  to distinguish positive from negative sentiment)
+        # Pass 3: per-sector sentiment (computed once, shared across countries)
         pos_tpl = self.DEFAULT_SENTIMENT_POS
         neg_tpl = self.DEFAULT_SENTIMENT_NEG
+        sorted_sectors = sorted(relevant_sectors)
+        pos_scores = self._nli_batch(text, [pos_tpl.format(sector=s) for s in sorted_sectors])
+        neg_scores = self._nli_batch(text, [neg_tpl.format(sector=s) for s in sorted_sectors])
+        sector_sentiment = {}
+        for sector, pos, neg in zip(sorted_sectors, pos_scores, neg_scores):
+            sentiment = round(max(-1.0, min(1.0, pos - neg)), 4)
+            sector_sentiment[sector] = sentiment
+
         signals = {}
         for country in relevant:
             country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
             if not country_sectors:
                 continue
-
-            pos_hyps = [pos_tpl.format(sector=s, country=country) for s in country_sectors]
-            neg_hyps = [neg_tpl.format(sector=s, country=country) for s in country_sectors]
-            pos_scores = self._nli_batch(text, pos_hyps)
-            neg_scores = self._nli_batch(text, neg_hyps)
-
-            country_signals = {}
-            for sector, pos, neg in zip(country_sectors, pos_scores, neg_scores):
-                sentiment = round(pos - neg, 4)
-                sentiment = max(-1.0, min(1.0, sentiment))
-                country_signals[sector] = sentiment
-
-            if country_signals:
-                signals[country.lower()] = country_signals
+            signals[country.lower()] = {s: sector_sentiment[s] for s in country_sectors}
 
         return signals
 
@@ -115,8 +108,8 @@ class DeBERTaNLI(BaseModel):
     ) -> tuple[float, float]:
         """Return (sentiment, impact) for the company."""
         text = self.truncate(text, CHUNK_SIZE)
-        pos = self._nli_batch(text, [f"positive for {company_name}"])[0]
-        neg = self._nli_batch(text, [f"negative for {company_name}"])[0]
+        pos = self._nli_batch(text, [f"This text is about positive news for {company_name}."])[0]
+        neg = self._nli_batch(text, [f"This text is about negative news for {company_name}."])[0]
         sentiment = max(-1.0, min(1.0, round(pos - neg, 4)))
         impact = round(max(pos, neg), 4)
         return sentiment, impact
