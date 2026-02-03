@@ -30,6 +30,15 @@ def _model_count() -> int:
     return max(sum(1 for _, caps in WORKER_CONFIGS if any(t == "classify" for t, _ in caps)), 1)
 
 
+DISPLAY_ORDER = [
+    "impact",
+    "classify:deberta",
+    "company_sentiment:deberta-aux",
+    "company-scanner",
+    "validate:deberta-aux",
+]
+
+
 def _merge_impact_workers(processing: dict, avg_times: dict) -> tuple[dict, dict]:
     """Collapse impact-1/2/3 into a single 'impact' entry for the UI."""
     merged_proc = {}
@@ -52,7 +61,10 @@ def _merge_impact_workers(processing: dict, avg_times: dict) -> tuple[dict, dict
         best = {"article_id": None, "article_url": None, "started_at": None}
     merged_proc["impact"] = best
     merged_avg["impact"] = round(sum(impact_avgs) / len(impact_avgs), 1) if impact_avgs else None
-    return merged_proc, merged_avg
+    # Reorder to match pipeline flow
+    ordered_proc = {k: merged_proc[k] for k in DISPLAY_ORDER if k in merged_proc}
+    ordered_avg = {k: merged_avg[k] for k in DISPLAY_ORDER if k in merged_avg}
+    return ordered_proc, ordered_avg
 
 
 logger = logging.getLogger(__name__)
