@@ -41,21 +41,16 @@ processing_status = {}
 # Last 10 inference durations per worker (seconds)
 worker_durations: dict[str, deque] = {}
 
-# Current thermal throttle delay (seconds) — exposed for the UI
-thermal_throttle: dict = {"delay": 0.0, "temp": None}
+# Thermal gate: pause all inference when CPU package temp >= 90°C,
+# resume when it drops below 75°C.  Exposed for the UI.
+thermal_throttle: dict = {"paused": False, "temp": None}
+THERMAL_PAUSE_TEMP = 90.0
+THERMAL_RESUME_TEMP = 75.0
 
 # --- Worker infrastructure ---
 _workers_running = False
 _worker_tasks: list[asyncio.Task] = []
 IDLE_SLEEP_NONE = 2.0  # seconds to sleep when no work available
-
-
-def _cpu_sleep() -> float:
-    """Adaptive sleep based on CPU usage. 0s below 80%, linear 1-10s from 80-100%."""
-    cpu = psutil.cpu_percent(interval=None)
-    if cpu < 80:
-        return 0.0
-    return 1.0 + (cpu - 80) * 0.45
 
 
 # Each worker pulls tasks in priority order.
@@ -88,34 +83,44 @@ WORKER_LABELS = {
 }
 
 
-def _thermal_delay() -> float:
-    """Compute inference pause based on CPU package temperature.
-
-    0s below 75°C, 5s at 75°C, +5s per degree above that.
-    """
+def _read_cpu_temp() -> float | None:
+    """Read CPU package temperature, or None if unavailable."""
     temps = getattr(psutil, "sensors_temperatures", lambda: None)()
     if not temps:
-        return 0.0
-    temp = None
+        return None
     for chip in ("coretemp", "k10temp"):
         if chip in temps:
             for entry in temps[chip]:
                 if "package" in (entry.label or "").lower():
-                    temp = entry.current
-                    break
-            if temp is None and temps[chip]:
-                temp = temps[chip][0].current
-            if temp is not None:
-                break
-    if temp is None and "x86_pkg_temp" in temps and temps["x86_pkg_temp"]:
-        temp = temps["x86_pkg_temp"][0].current
+                    return entry.current
+            if temps[chip]:
+                return temps[chip][0].current
+    if "x86_pkg_temp" in temps and temps["x86_pkg_temp"]:
+        return temps["x86_pkg_temp"][0].current
+    return None
+
+
+async def _thermal_gate():
+    """Block until CPU temperature is safe for inference.
+
+    Pauses at >= 90°C, resumes at < 75°C.  No-op when temp is unavailable.
+    """
+    temp = _read_cpu_temp()
     thermal_throttle["temp"] = temp
-    if temp is None or temp < 75:
-        thermal_throttle["delay"] = 0.0
-        return 0.0
-    delay = (temp - 74) * 3.0
-    thermal_throttle["delay"] = delay
-    return delay
+    if temp is None:
+        return
+
+    if not thermal_throttle["paused"] and temp >= THERMAL_PAUSE_TEMP:
+        thermal_throttle["paused"] = True
+        logger.warning("Thermal gate: PAUSED at %.0f°C — waiting for < %.0f°C", temp, THERMAL_RESUME_TEMP)
+
+    while thermal_throttle["paused"] and _workers_running:
+        await asyncio.sleep(5)
+        temp = _read_cpu_temp()
+        thermal_throttle["temp"] = temp
+        if temp is None or temp < THERMAL_RESUME_TEMP:
+            thermal_throttle["paused"] = False
+            logger.info("Thermal gate: RESUMED at %.0f°C", temp or 0)
 
 
 class EnsembleClassifier:
@@ -274,15 +279,6 @@ class EnsembleClassifier:
             await save_result(article["id"], model_name, {})
 
         self._clear_model_status(status_key)
-        delay = _thermal_delay()
-        if delay > 0:
-            logger.info(
-                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
-                model_name,
-                delay,
-                thermal_throttle["temp"],
-            )
-            await asyncio.sleep(delay)
         return True
 
     async def score_next_impact(self, scorer_name: str | None = None) -> bool:
@@ -337,15 +333,6 @@ class EnsembleClassifier:
             await save_impact(article["id"], 0.0)
 
         self._clear_model_status(status_key)
-        delay = _thermal_delay()
-        if delay > 0:
-            logger.info(
-                "[%s] Thermal throttle: %.0fs pause (CPU %.0f°C)",
-                scorer.name,
-                delay,
-                thermal_throttle["temp"],
-            )
-            await asyncio.sleep(delay)
         return True
 
     async def fetch_aliases(self) -> bool:
@@ -574,9 +561,6 @@ class EnsembleClassifier:
             await delete_company_result(article_id, ticker)
 
         self._clear_model_status(status_key)
-        delay = _thermal_delay()
-        if delay > 0:
-            await asyncio.sleep(delay)
         return True
 
     async def classify_next_company_sentiment(
@@ -673,9 +657,6 @@ class EnsembleClassifier:
                 await save_company_sentiment(article_id, ticker, 0.0, 0.0)
 
             self._clear_model_status(status_key)
-            delay = _thermal_delay()
-            if delay > 0:
-                await asyncio.sleep(delay)
             return True
 
     async def _prefetch_content_loop(self):
@@ -763,11 +744,9 @@ class EnsembleClassifier:
                             "[worker:%s] Error in %s", worker_name, task_type
                         )
 
-                delay = _cpu_sleep()
+                await _thermal_gate()
                 if not did_work:
-                    await asyncio.sleep(max(delay, IDLE_SLEEP_NONE))
-                elif delay > 0:
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(IDLE_SLEEP_NONE)
         except asyncio.CancelledError:
             pass
 
