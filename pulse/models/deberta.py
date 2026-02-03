@@ -100,7 +100,7 @@ class DeBERTaNLI(BaseModel):
     def validate_company(self, text: str, company_name: str) -> float:
         """Score how relevant the article is to the given company."""
         text = self.truncate(text, CHUNK_SIZE)
-        scores = self._nli_batch(text, [f"This article is about {company_name}"])
+        scores = self._nli_batch(text, [f"This text is about {company_name}."])
         return scores[0]
 
     def score_company_sentiment(

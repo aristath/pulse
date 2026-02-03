@@ -516,7 +516,7 @@ class EnsembleClassifier:
             "started_at": time.time(),
         }
 
-        logger.info("[validate] Checking %s for article %d", ticker, article_id)
+        logger.info("[validate] Checking %s (%s) for article %d", ticker, company_name, article_id)
 
         # Fetch the full article to check for stored content
         full_article = await get_article(article_id)
