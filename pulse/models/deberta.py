@@ -37,8 +37,8 @@ class DeBERTaNLI(BaseModel):
         kind = "OpenVINO" if hasattr(self._model, "request") else "PyTorch"
         logger.info("%s loaded (%s)", self.name, kind)
 
-    DEFAULT_COUNTRY = "This article is about {country}."
-    DEFAULT_SECTOR = "This is relevant to the {sector} sector."
+    DEFAULT_COUNTRY = "This text is relevant to {country}."
+    DEFAULT_SECTOR = "This text is about the {sector} sector in {country}."
     DEFAULT_SENTIMENT_POS = "This text is about positive news for the {sector} sector."
     DEFAULT_SENTIMENT_NEG = "This text is about negative news for the {sector} sector."
 
@@ -55,46 +55,44 @@ class DeBERTaNLI(BaseModel):
             return {}
 
         text = self.truncate(text, CHUNK_SIZE)
+
+        # Pass 1: geography pre-filter
         country_tpl = prompt_country or self.DEFAULT_COUNTRY
+        country_hyps = [country_tpl.format(country=c) for c in countries]
+        country_scores = self._nli_batch(text, country_hyps)
+        candidate_countries = [c for c, s in zip(countries, country_scores) if s >= RELEVANCE_THRESHOLD]
+        if not candidate_countries:
+            return {}
+
+        # Pass 2: combined country+sector relevance
         sector_tpl = prompt_sector or self.DEFAULT_SECTOR
-
-        # Pass 1: country relevance
-        country_hypotheses = [country_tpl.format(country=c) for c in countries]
-        scores = self._nli_batch(text, country_hypotheses)
-        relevant = [c for c, s in zip(countries, scores) if s >= RELEVANCE_THRESHOLD]
-        if not relevant:
+        pairs = []
+        hypotheses = []
+        for country in candidate_countries:
+            for sector in sectors.get(country, sectors.get("global", [])):
+                pairs.append((country, sector))
+                hypotheses.append(sector_tpl.format(country=country, sector=sector))
+        scores = self._nli_batch(text, hypotheses)
+        matched = {}
+        for (country, sector), score in zip(pairs, scores):
+            if score >= RELEVANCE_THRESHOLD:
+                matched.setdefault(country.lower(), set()).add(sector)
+        if not matched:
             return {}
 
-        # Pass 2: sector relevance
-        all_sectors = set()
-        for country in relevant:
-            all_sectors.update(sectors.get(country, sectors.get("global", [])))
-        all_sectors = sorted(all_sectors)
-
-        sector_hypotheses = [sector_tpl.format(sector=s) for s in all_sectors]
-        sector_scores = self._nli_batch(text, sector_hypotheses)
-        relevant_sectors = {s for s, sc in zip(all_sectors, sector_scores) if sc >= RELEVANCE_THRESHOLD}
-        if not relevant_sectors:
-            return {}
-
-        # Pass 3: per-sector sentiment (computed once, shared across countries)
+        # Pass 3: per-sector sentiment
+        all_sectors = sorted({s for secs in matched.values() for s in secs})
         pos_tpl = self.DEFAULT_SENTIMENT_POS
         neg_tpl = self.DEFAULT_SENTIMENT_NEG
-        sorted_sectors = sorted(relevant_sectors)
-        pos_scores = self._nli_batch(text, [pos_tpl.format(sector=s) for s in sorted_sectors])
-        neg_scores = self._nli_batch(text, [neg_tpl.format(sector=s) for s in sorted_sectors])
+        pos_scores = self._nli_batch(text, [pos_tpl.format(sector=s) for s in all_sectors])
+        neg_scores = self._nli_batch(text, [neg_tpl.format(sector=s) for s in all_sectors])
         sector_sentiment = {}
-        for sector, pos, neg in zip(sorted_sectors, pos_scores, neg_scores):
-            sentiment = round(max(-1.0, min(1.0, pos - neg)), 4)
-            sector_sentiment[sector] = sentiment
+        for sector, pos, neg in zip(all_sectors, pos_scores, neg_scores):
+            sector_sentiment[sector] = round(max(-1.0, min(1.0, pos - neg)), 4)
 
         signals = {}
-        for country in relevant:
-            country_sectors = [s for s in sectors.get(country, sectors.get("global", [])) if s in relevant_sectors]
-            if not country_sectors:
-                continue
-            signals[country.lower()] = {s: sector_sentiment[s] for s in country_sectors}
-
+        for country_lower, secs in matched.items():
+            signals[country_lower] = {s: sector_sentiment[s] for s in sorted(secs)}
         return signals
 
     def validate_company(self, text: str, company_name: str) -> float:

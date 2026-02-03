@@ -145,11 +145,11 @@
                         </div>
                         <div class="settings-field">
                             <label>Country Relevance <code>{country}</code></label>
-                            <input type="text" name="prompt_country" value="{{ prompt_country }}" placeholder="This article is about {country}.">
+                            <input type="text" name="prompt_country" value="{{ prompt_country }}" placeholder="This text is relevant to {country}.">
                         </div>
                         <div class="settings-field">
-                            <label>Sector Relevance <code>{sector}</code></label>
-                            <input type="text" name="prompt_sector" value="{{ prompt_sector }}" placeholder="This is relevant to the {sector} sector.">
+                            <label>Sector Relevance <code>{sector} {country}</code></label>
+                            <input type="text" name="prompt_sector" value="{{ prompt_sector }}" placeholder="This text is about the {sector} sector in {country}.">
                         </div>
                         <div class="settings-field">
                             <label>Sector Sentiment <code>{sector} {country}</code></label>
