@@ -733,6 +733,30 @@ async def get_sentiment_bar_articles(
     return result
 
 
+async def get_articles_by_month() -> list[dict]:
+    """Return count of relevant articles per month, newest first.
+
+    An article is 'relevant' if any model produced non-empty signals for it.
+    """
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """
+            SELECT strftime('%Y-%m', a.published_at, 'unixepoch') AS month,
+                   COUNT(DISTINCT r.article_id) AS cnt
+            FROM results r
+            JOIN articles a ON r.article_id = a.id
+            WHERE r.signals != '{}'
+              AND a.published_at IS NOT NULL
+            GROUP BY month
+            ORDER BY month DESC
+            """,
+        )
+        return [{"month": row[0], "count": row[1]} for row in rows]
+    finally:
+        await db.close()
+
+
 # --- Settings ---
 
 # --- Alias Scans & Company Results ---

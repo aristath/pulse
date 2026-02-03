@@ -238,6 +238,11 @@ async def api_charts_sentiment_bar_articles(type: str, label: str, days: int = 9
     return await db.get_sentiment_bar_articles(type, label, threshold, days=days, decay=decay)
 
 
+@app.get("/api/charts/articles-by-month")
+async def api_charts_articles_by_month():
+    return await db.get_articles_by_month()
+
+
 @app.get("/api/stats")
 async def api_stats():
     return await db.get_stats(_model_count())

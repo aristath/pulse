@@ -78,6 +78,9 @@
 
             <h3 style="margin-top:1.5rem;">Sentiment by Company</h3>
             <div id="chart-company-bars" class="sentiment-bars"></div>
+
+            <h3 style="margin-top:1.5rem;">Relevant Articles by Month</h3>
+            <div id="chart-articles-by-month"></div>
         </div>
 
         <!-- Feeds -->
@@ -327,19 +330,38 @@
         document.getElementById('chart-days').addEventListener('change', refreshBarCharts);
         document.getElementById('chart-decay').addEventListener('change', refreshBarCharts);
 
+        function renderArticlesByMonth(container, data) {
+            if (!data.length) { container.innerHTML = '<span style="color:#8888a0;font-size:0.8rem">No data</span>'; return; }
+            var maxCount = 0;
+            for (var i = 0; i < data.length; i++) { if (data[i].count > maxCount) maxCount = data[i].count; }
+            var html = '';
+            for (var i = 0; i < data.length; i++) {
+                var d = data[i];
+                var pct = maxCount > 0 ? (d.count / maxCount) * 100 : 0;
+                html += '<div class="sbar-row">'
+                    + '<span class="sbar-label">' + d.month + '</span>'
+                    + '<div class="sbar-track"><div class="sbar-fill" style="left:0;width:' + pct + '%;background:#6366f1"></div></div>'
+                    + '<span class="sbar-val">' + d.count + '</span>'
+                    + '</div>';
+            }
+            container.innerHTML = html;
+        }
+
         function refreshBarCharts() {
             var p = chartParams();
             Promise.all([
                 fetch('/api/charts/sentiment-bars?type=country' + p).then(function(r) { return r.json(); }),
                 fetch('/api/charts/sentiment-bars?type=industry' + p).then(function(r) { return r.json(); }),
                 fetch('/api/charts/sentiment-bars?type=company' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=detailed' + p).then(function(r) { return r.json(); })
+                fetch('/api/charts/sentiment-bars?type=detailed' + p).then(function(r) { return r.json(); }),
+                fetch('/api/charts/articles-by-month').then(function(r) { return r.json(); })
             ]).then(function(results) {
                 renderBarChart(document.getElementById('chart-country-bars'), results[0], 'country');
                 renderBarChart(document.getElementById('chart-industry-bars'), results[1], 'industry');
                 renderBarChart(document.getElementById('chart-company-bars'), results[2], 'company');
                 renderGroupedCharts(document.getElementById('chart-industries-by-country'), results[3], 'country', 'industry');
                 renderGroupedCharts(document.getElementById('chart-countries-by-industry'), results[3], 'industry', 'country');
+                renderArticlesByMonth(document.getElementById('chart-articles-by-month'), results[4]);
             }).catch(function(e) { console.error('Bar chart refresh failed:', e); });
         }
 
