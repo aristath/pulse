@@ -79,7 +79,7 @@ WORKER_LABELS = {
     "classify:deberta": "Classify (DeBERTa)",
     "validate:deberta-aux": "Validate (DeBERTa)",
     "company_sentiment:deberta-aux": "Sentiment (DeBERTa)",
-    "company-scanner": "Company Scanner (GLiNER)",
+    "company-scanner": "Company Scanner (spaCy)",
 }
 
 

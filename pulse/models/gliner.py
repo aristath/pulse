@@ -1,12 +1,10 @@
 import logging
 
 import spacy
-from gliner import GLiNER
 from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 
-GLINER_MODEL_ID = "knowledgator/gliner-bi-edge-v2.0"
 SPACY_MODEL = "en_core_web_lg"
 FUZZY_THRESHOLD = 80
 
@@ -14,14 +12,10 @@ FUZZY_THRESHOLD = 80
 class CompanyScanner:
     """Two-stage company scanner: spaCy NER extracts ORG entities,
     RapidFuzz matches them against the alias list.
-
-    GLiNER model is kept loaded for potential future use but is not
-    used for scanning.
     """
 
     def __init__(self):
-        self._model: GLiNER | None = None
-        self._nlp = None  # spaCy model
+        self._nlp = None
         self._alias_to_ticker: dict[str, str] = {}
         self._all_aliases: list[str] = []
 
@@ -38,10 +32,6 @@ class CompanyScanner:
         return self._alias_to_ticker
 
     def load(self):
-        logger.info("Loading %s...", GLINER_MODEL_ID)
-        self._model = GLiNER.from_pretrained(GLINER_MODEL_ID)
-        logger.info("GLiNER loaded (kept for future use)")
-
         logger.info("Loading spaCy %s...", SPACY_MODEL)
         self._nlp = spacy.load(SPACY_MODEL)
         logger.info("spaCy loaded")

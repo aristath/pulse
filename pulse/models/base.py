@@ -87,7 +87,7 @@ def load_sequence_classification_model(model_id: str, device: str = "CPU", openv
 class BaseModel(ABC):
     """Base interface for all classification models."""
 
-    name: str  # unique model identifier, e.g. 'gliclass-large'
+    name: str  # unique model identifier, e.g. 'deberta'
 
     @abstractmethod
     def load(self):
