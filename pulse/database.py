@@ -196,8 +196,8 @@ async def add_articles(feed_id: int, articles: list[dict]) -> int:
         for article in articles:
             try:
                 await db.execute(
-                    "INSERT INTO articles (feed_id, url, published_at) VALUES (?, ?, ?)",
-                    (feed_id, article["url"], _normalize_date(article.get("published_at"))),
+                    "INSERT INTO articles (feed_id, url, title, published_at) VALUES (?, ?, ?, ?)",
+                    (feed_id, article["url"], article.get("title"), _normalize_date(article.get("published_at"))),
                 )
                 added += 1
             except aiosqlite.IntegrityError:
