@@ -249,7 +249,7 @@ async def get_next_article_for_impact() -> dict | None:
             WHERE id = (
                 SELECT a.id FROM articles a
                 WHERE a.impact IS NULL
-                  AND a.content IS NOT NULL AND a.content != ''
+                  AND a.content IS NOT NULL
                 ORDER BY a.published_at DESC, a.id DESC
                 LIMIT 1
             )
