@@ -523,19 +523,19 @@ async def get_stats(model_count: int = 1) -> dict:
 
 
 async def get_top_impactful_articles(limit: int = 20) -> list[dict]:
-    """Return the most recent high-impact articles (above classify threshold)."""
-    threshold = float(await get_setting("classify_threshold") or "0.5")
+    """Return the most recent high-impact articles that have non-empty classification signals."""
     db = await get_db()
     try:
         cursor = await db.execute(
             """
-            SELECT id, url, title, impact, published_at
-            FROM articles
-            WHERE impact >= ?
-            ORDER BY published_at DESC
+            SELECT a.id, a.url, a.title, a.impact, a.published_at
+            FROM articles a
+            JOIN results r ON r.article_id = a.id
+            WHERE r.signals != '{}'
+            ORDER BY a.published_at DESC
             LIMIT ?
             """,
-            (threshold, limit),
+            (limit,),
         )
         return [dict(row) for row in await cursor.fetchall()]
     finally:
