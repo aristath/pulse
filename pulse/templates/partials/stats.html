@@ -230,6 +230,21 @@
             </div>
         </div>
 
+        <!-- Top Impactful News -->
+        <div class="dash-card">
+            <h3>Latest Impactful News</h3>
+            <div class="top-articles">
+            {% for article in top_articles %}
+                <a href="{{ article.url }}" target="_blank" class="top-article-row" title="{{ article.title }}">
+                    <span class="top-article-title">{{ article.title }}</span>
+                    <span class="top-article-impact">{{ "%.0f"|format(article.impact * 100) }}%</span>
+                </a>
+            {% else %}
+                <p style="color: var(--text-dim); font-size: 0.8rem;">No impactful articles yet.</p>
+            {% endfor %}
+            </div>
+        </div>
+
     </div>
 </div>
 

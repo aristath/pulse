@@ -129,6 +129,7 @@ async def dashboard(request: Request):
     classify_threshold = await db.get_setting("classify_threshold") or "0.5"
     scan_threshold = await db.get_setting("scan_threshold") or "0.3"
     validate_threshold = await db.get_setting("validate_threshold") or "0.5"
+    top_articles = await db.get_top_impactful_articles()
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -147,6 +148,7 @@ async def dashboard(request: Request):
             "classify_threshold": classify_threshold,
             "scan_threshold": scan_threshold,
             "validate_threshold": validate_threshold,
+            "top_articles": top_articles,
         },
     )
 

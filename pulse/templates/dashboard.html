@@ -173,6 +173,33 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Top impactful articles */
+.top-article-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+    text-decoration: none;
+    color: var(--text);
+}
+.top-article-row:last-child { border-bottom: none; }
+.top-article-row:hover { color: var(--accent); }
+.top-article-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.top-article-impact {
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Period switcher */
 .period-btn {
     background: transparent;
