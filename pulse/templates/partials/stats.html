@@ -292,7 +292,10 @@
             var pct = Math.abs(v) * 50;
             var color = v >= 0 ? '#22c55e' : '#ef4444';
             var left = v >= 0 ? '50%' : (50 - pct) + '%';
+            var countryAttr = d.country ? ' data-country="' + String(d.country).replace(/"/g, '&quot;') + '"' : '';
+            var industryAttr = d.industry ? ' data-industry="' + String(d.industry).replace(/"/g, '&quot;') + '"' : '';
             return '<div class="sbar-row" data-type="' + barType + '" data-label="' + d.label.replace(/"/g, '&quot;') + '"'
+                + countryAttr + industryAttr
                 + ' title="' + d.label + ': ' + v.toFixed(4) + ' (' + d.article_count + ' articles)">'
                 + '<span class="sbar-label">' + d.label + '</span>'
                 + '<div class="sbar-track"><div class="sbar-zero"></div>'
@@ -314,7 +317,13 @@
                 var d = data[i];
                 var g = d[groupKey];
                 if (!groups[g]) groups[g] = [];
-                groups[g].push({label: d[labelKey], avg_sentiment: d.avg_sentiment, article_count: d.article_count});
+                var item = {label: d[labelKey], avg_sentiment: d.avg_sentiment, article_count: d.article_count};
+                if (labelKey === 'industry') {
+                    item.country = g;
+                } else {
+                    item.industry = g;
+                }
+                groups[g].push(item);
             }
             var html = '';
             var keys = Object.keys(groups).sort();
@@ -327,12 +336,15 @@
             container.innerHTML = html || '<span style="color:#8888a0;font-size:0.8rem">No data</span>';
         }
 
-        function openArticleModal(barType, label) {
+        function openArticleModal(barType, label, country, industry) {
             var modal = document.getElementById('article-modal');
             document.getElementById('modal-title').textContent = label + ' (' + barType + ')';
             document.getElementById('modal-body').innerHTML = '<span style="color:#8888a0">Loading...</span>';
             modal.style.display = 'flex';
-            fetch('/api/charts/sentiment-bar-articles?type=' + encodeURIComponent(barType) + '&label=' + encodeURIComponent(label))
+            var url = '/api/charts/sentiment-bar-articles?type=' + encodeURIComponent(barType) + '&label=' + encodeURIComponent(label);
+            if (country) url += '&country=' + encodeURIComponent(country);
+            if (industry) url += '&industry=' + encodeURIComponent(industry);
+            fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(articles) {
                     if (!articles.length) {
@@ -360,7 +372,7 @@
         document.getElementById('charts-card').addEventListener('click', function(e) {
             var row = e.target.closest('.sbar-row');
             if (!row) return;
-            openArticleModal(row.dataset.type, row.dataset.label);
+            openArticleModal(row.dataset.type, row.dataset.label, row.dataset.country, row.dataset.industry);
         });
 
         function refreshBarCharts() {

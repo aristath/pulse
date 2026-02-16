@@ -23,6 +23,16 @@ def _coerce_max_memory_days(raw: str | None) -> int:
     return max(MAX_MEMORY_DAYS_MIN, min(MAX_MEMORY_DAYS_MAX, days))
 
 
+def _credibility_multiplier(article_count: int) -> float:
+    """Scale sentiment confidence from 0.1..1.0 based on article count.
+
+    1 article => 0.1, 2 => 0.2, ..., 10+ => 1.0
+    """
+    if article_count <= 0:
+        return 0.0
+    return min(article_count, 10) / 10.0
+
+
 def _normalize_date(value) -> int | None:
     """Convert any date representation to a unix timestamp (int)."""
     if value is None:
@@ -560,7 +570,7 @@ async def get_top_impactful_articles(limit: int = 20) -> list[dict]:
 async def get_sentiment_bars(
     bar_type: str, threshold: float, days: int = 90
 ) -> list[dict]:
-    """Return average sentiment for the last N days.
+    """Return confidence-weighted average sentiment for the last N days.
 
     Returns [{label, avg_sentiment, article_count}, ...] sorted by avg_sentiment DESC.
     """
@@ -654,16 +664,18 @@ async def get_sentiment_bars(
             if total_weight == 0:
                 continue
             avg = sum(s * w for s, w in entries) / total_weight
+            article_count = len(entries)
+            adjusted = avg * _credibility_multiplier(article_count)
             result.append({
                 "country": country,
                 "industry": industry,
-                "avg_sentiment": avg,
-                "article_count": len(entries),
+                "avg_sentiment": adjusted,
+                "article_count": article_count,
             })
         result.sort(key=lambda x: x["avg_sentiment"], reverse=True)
         return result
 
-    # Group by label and compute average
+    # Group by label and compute confidence-weighted average
     label_groups: dict[str, list[tuple[float, float]]] = {}
     for row in rows:
         label = row["label"]
@@ -679,17 +691,24 @@ async def get_sentiment_bars(
         if total_weight == 0:
             continue
         avg = sum(s * w for s, w in entries) / total_weight
+        article_count = len(entries)
+        adjusted = avg * _credibility_multiplier(article_count)
         result.append({
             "label": label,
-            "avg_sentiment": avg,
-            "article_count": len(entries),
+            "avg_sentiment": adjusted,
+            "article_count": article_count,
         })
     result.sort(key=lambda x: x["avg_sentiment"], reverse=True)
     return result
 
 
 async def get_sentiment_bar_articles(
-    bar_type: str, label: str, threshold: float, days: int = 90
+    bar_type: str,
+    label: str,
+    threshold: float,
+    days: int = 90,
+    country: str | None = None,
+    industry: str | None = None,
 ) -> list[dict]:
     """Return individual articles contributing to a sentiment bar, ordered by contribution.
 
@@ -700,8 +719,7 @@ async def get_sentiment_bar_articles(
     db = await get_db()
     try:
         if bar_type == "country":
-            cursor = await db.execute(
-                """
+            sql = """
                 SELECT r.article_id, a.title, a.url,
                        AVG(CAST(sector.value AS REAL)) AS sentiment,
                        a.published_at
@@ -713,13 +731,15 @@ async def get_sentiment_bar_articles(
                   AND a.impact IS NOT NULL AND a.impact >= ?
                   AND r.signals != '{}'
                   AND country.key = ?
-                GROUP BY r.article_id
-                """,
-                (cutoff, threshold, label),
-            )
+            """
+            params: list = [cutoff, threshold, label]
+            if industry:
+                sql += " AND sector.key = ?"
+                params.append(industry)
+            sql += " GROUP BY r.article_id"
+            cursor = await db.execute(sql, tuple(params))
         elif bar_type == "industry":
-            cursor = await db.execute(
-                """
+            sql = """
                 SELECT r.article_id, a.title, a.url,
                        AVG(CAST(sector.value AS REAL)) AS sentiment,
                        a.published_at
@@ -731,10 +751,13 @@ async def get_sentiment_bar_articles(
                   AND a.impact IS NOT NULL AND a.impact >= ?
                   AND r.signals != '{}'
                   AND sector.key = ?
-                GROUP BY r.article_id
-                """,
-                (cutoff, threshold, label),
-            )
+            """
+            params: list = [cutoff, threshold, label]
+            if country:
+                sql += " AND country.key = ?"
+                params.append(country)
+            sql += " GROUP BY r.article_id"
+            cursor = await db.execute(sql, tuple(params))
         elif bar_type == "company":
             cursor = await db.execute(
                 """
