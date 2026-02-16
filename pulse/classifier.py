@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections import deque
@@ -15,12 +17,12 @@ from pulse.database import (
     get_unprocessed_article_for_model,
     get_next_article_for_impact,
     get_setting,
+    set_setting,
     save_result,
     save_impact,
     update_article_date,
     get_article,
-    get_article_missing_alias,
-    get_scanned_aliases,
+    get_company_scan_candidates,
     save_scanned_aliases,
     save_company_mention,
     get_next_unscored_company_result,
@@ -30,6 +32,7 @@ from pulse.database import (
     delete_company_result,
     get_articles_needing_content,
     store_article_content,
+    delete_article,
 )
 from pulse.fetcher import fetch_article_content
 
@@ -51,6 +54,9 @@ THERMAL_RESUME_TEMP = 75.0
 _workers_running = False
 _worker_tasks: list[asyncio.Task] = []
 IDLE_SLEEP_NONE = 2.0  # seconds to sleep when no work available
+COMPANY_SCAN_STATE_KEY = "company_scan_state"
+COMPANY_SCAN_BATCH_SIZE = 200
+COMPANY_SCAN_MAX_BATCHES = 6
 
 
 # Each worker pulls tasks in priority order.
@@ -397,16 +403,79 @@ class EnsembleClassifier:
             if not self._company_scanner.ready:
                 return False
 
-        all_aliases = self._company_scanner.all_aliases
+        all_aliases = list(dict.fromkeys(self._company_scanner.all_aliases))
         if not all_aliases:
             return False
 
-        # Find an article that is missing at least one alias
+        alias_hash = hashlib.sha1(
+            "\n".join(sorted(all_aliases)).encode("utf-8")
+        ).hexdigest()
+        cursor_id: int | None = None
+        state_hash: str | None = None
+
+        raw_state = await get_setting(COMPANY_SCAN_STATE_KEY)
+        if raw_state:
+            try:
+                state = json.loads(raw_state)
+                if isinstance(state, dict):
+                    raw_last_id = state.get("last_id")
+                    if raw_last_id is not None:
+                        cursor_id = int(raw_last_id)
+                    raw_hash = state.get("alias_hash")
+                    if isinstance(raw_hash, str):
+                        state_hash = raw_hash
+            except (json.JSONDecodeError, TypeError, ValueError):
+                cursor_id = None
+                state_hash = None
+
+        # Alias list changed: restart the scan walk from newest rows.
+        if state_hash != alias_hash:
+            cursor_id = None
+
         article = None
-        for alias in all_aliases:
-            article = await get_article_missing_alias(alias)
+        missing: list[str] = []
+        next_cursor = cursor_id
+        wrapped = False
+        for _ in range(COMPANY_SCAN_MAX_BATCHES):
+            candidates = await get_company_scan_candidates(
+                last_id=next_cursor, limit=COMPANY_SCAN_BATCH_SIZE
+            )
+            if not candidates:
+                if next_cursor is not None and not wrapped:
+                    next_cursor = None
+                    wrapped = True
+                    continue
+                next_cursor = None
+                break
+
+            for candidate in candidates:
+                next_cursor = candidate["id"]
+                scanned_raw = candidate.get("scanned_aliases")
+                scanned_aliases: list[str] = []
+                if scanned_raw:
+                    try:
+                        parsed = json.loads(scanned_raw)
+                        if isinstance(parsed, list):
+                            scanned_aliases = [
+                                v for v in parsed if isinstance(v, str)
+                            ]
+                    except (json.JSONDecodeError, TypeError):
+                        scanned_aliases = []
+
+                scanned_set = set(scanned_aliases)
+                candidate_missing = [a for a in all_aliases if a not in scanned_set]
+                if candidate_missing:
+                    article = candidate
+                    missing = candidate_missing
+                    break
             if article:
                 break
+
+        await set_setting(
+            COMPANY_SCAN_STATE_KEY,
+            json.dumps({"last_id": next_cursor, "alias_hash": alias_hash}),
+        )
+
         if not article:
             return False
 
@@ -415,10 +484,6 @@ class EnsembleClassifier:
             "article_url": article["url"],
             "started_at": time.time(),
         }
-
-        stored = await get_scanned_aliases(article["id"])
-        stored_set = set(stored)
-        missing = [a for a in all_aliases if a not in stored_set]
 
         logger.info(
             "[company-scanner] Scanning article %d (%d missing aliases): %s",
@@ -678,16 +743,20 @@ class EnsembleClassifier:
         """Fetch content for a single article and store it in the DB."""
         try:
             content, published_at = await fetch_article_content(article["url"])
-            if content:
-                await store_article_content(article["id"], content, published_at)
-            else:
-                # Store empty string to prevent retry, save impact=0
-                await store_article_content(article["id"], "", None)
-                await save_impact(article["id"], 0.0)
+            has_content = bool(content and content.strip())
+            existing_published_at = article.get("published_at")
+            resolved_published_at = (
+                published_at if published_at is not None else existing_published_at
+            )
+
+            if not has_content or resolved_published_at is None:
+                await delete_article(article["id"])
+                return
+
+            await store_article_content(article["id"], content, published_at)
         except Exception as e:
             logger.error("[prefetcher] Failed for article %d: %s", article["id"], e)
-            await store_article_content(article["id"], "", None)
-            await save_impact(article["id"], 0.0)
+            await delete_article(article["id"])
 
     def _get_model(self, name: str) -> BaseModel | None:
         for m in self._models:

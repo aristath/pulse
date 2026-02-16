@@ -23,6 +23,19 @@ from pulse.fundus_crawler import (
 )
 from pulse.scheduler import start_scheduler, stop_scheduler
 
+MAX_MEMORY_DAYS_DEFAULT = 21
+MAX_MEMORY_DAYS_MIN = 1
+MAX_MEMORY_DAYS_MAX = 120
+
+
+def _coerce_max_memory_days(value: str | None) -> int:
+    """Parse and clamp max memory days setting."""
+    try:
+        days = int((value or "").strip())
+    except (TypeError, ValueError, AttributeError):
+        return MAX_MEMORY_DAYS_DEFAULT
+    return max(MAX_MEMORY_DAYS_MIN, min(MAX_MEMORY_DAYS_MAX, days))
+
 
 def _model_count() -> int:
     """Count models that do classify work (write to results table)."""
@@ -126,6 +139,9 @@ async def dashboard(request: Request):
     prompt_sentiment = await db.get_setting("prompt_sentiment") or ""
     prompt_sector = await db.get_setting("prompt_sector") or ""
     prompt_company = await db.get_setting("prompt_company") or ""
+    max_memory_days = str(
+        _coerce_max_memory_days(await db.get_setting("max_memory_days"))
+    )
     classify_threshold = await db.get_setting("classify_threshold") or "0.5"
     scan_threshold = await db.get_setting("scan_threshold") or "0.3"
     validate_threshold = await db.get_setting("validate_threshold") or "0.5"
@@ -145,6 +161,7 @@ async def dashboard(request: Request):
             "prompt_sentiment": prompt_sentiment,
             "prompt_sector": prompt_sector,
             "prompt_company": prompt_company,
+            "max_memory_days": max_memory_days,
             "classify_threshold": classify_threshold,
             "scan_threshold": scan_threshold,
             "validate_threshold": validate_threshold,
@@ -223,21 +240,21 @@ async def api_article_company_results(article_id: int):
 
 
 @app.get("/api/charts/sentiment-bars")
-async def api_charts_sentiment_bars(type: str = "country", days: int = 90, decay: bool = True):
+async def api_charts_sentiment_bars(type: str = "country", days: int = 90):
     if type not in ("country", "industry", "company", "detailed"):
         raise HTTPException(400, "type must be 'country', 'industry', 'company', or 'detailed'")
     days = max(1, min(days, 3650))
     threshold = float(await db.get_setting("classify_threshold") or "0.5")
-    return await db.get_sentiment_bars(type, threshold, days=days, decay=decay)
+    return await db.get_sentiment_bars(type, threshold, days=days)
 
 
 @app.get("/api/charts/sentiment-bar-articles")
-async def api_charts_sentiment_bar_articles(type: str, label: str, days: int = 90, decay: bool = True):
+async def api_charts_sentiment_bar_articles(type: str, label: str, days: int = 90):
     if type not in ("country", "industry", "company"):
         raise HTTPException(400, "type must be 'country', 'industry', or 'company'")
     days = max(1, min(days, 3650))
     threshold = float(await db.get_setting("classify_threshold") or "0.5")
-    return await db.get_sentiment_bar_articles(type, label, threshold, days=days, decay=decay)
+    return await db.get_sentiment_bar_articles(type, label, threshold, days=days)
 
 
 @app.get("/api/charts/articles-by-month")
@@ -383,6 +400,19 @@ async def api_set_prompts(
     await db.set_setting("prompt_sentiment", (prompt_sentiment or "").strip())
     await db.set_setting("prompt_company", (prompt_company or "").strip())
     return {"ok": True}
+
+
+@app.put("/api/settings/memory")
+async def api_set_memory(
+    request: Request,
+    max_memory_days: str = Form(None),
+):
+    if max_memory_days is None:
+        body = await request.json()
+        max_memory_days = body.get("max_memory_days", str(MAX_MEMORY_DAYS_DEFAULT))
+    days = _coerce_max_memory_days(max_memory_days)
+    await db.set_setting("max_memory_days", str(days))
+    return {"ok": True, "max_memory_days": days}
 
 
 @app.put("/api/settings/thresholds")

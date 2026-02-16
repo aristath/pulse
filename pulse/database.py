@@ -1,6 +1,5 @@
 import json
 import logging
-import math
 import time
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +8,19 @@ import aiosqlite
 from dateutil import parser as dateutil_parser
 
 logger = logging.getLogger(__name__)
+
+MAX_MEMORY_DAYS_DEFAULT = 21
+MAX_MEMORY_DAYS_MIN = 1
+MAX_MEMORY_DAYS_MAX = 120
+
+
+def _coerce_max_memory_days(raw: str | None) -> int:
+    """Parse and clamp max memory days setting."""
+    try:
+        days = int((raw or "").strip())
+    except (TypeError, ValueError, AttributeError):
+        return MAX_MEMORY_DAYS_DEFAULT
+    return max(MAX_MEMORY_DAYS_MIN, min(MAX_MEMORY_DAYS_MAX, days))
 
 
 def _normalize_date(value) -> int | None:
@@ -545,11 +557,11 @@ async def get_top_impactful_articles(limit: int = 20) -> list[dict]:
 # --- Charts ---
 
 
-async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, decay: bool = True) -> list[dict]:
-    """Return (optionally decay-weighted) average sentiment for the last N days.
+async def get_sentiment_bars(
+    bar_type: str, threshold: float, days: int = 90
+) -> list[dict]:
+    """Return average sentiment for the last N days.
 
-    When decay=True: weight = exp(-0.1 * age_days).
-    When decay=False: uniform weight (simple average).
     Returns [{label, avg_sentiment, article_count}, ...] sorted by avg_sentiment DESC.
     """
     now = time.time()
@@ -632,8 +644,7 @@ async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, de
             pub = row["published_at"]
             if pub is None:
                 continue
-            age_days = (now - float(pub)) / 86400
-            weight = math.exp(-0.1 * age_days) if decay else 1.0
+            weight = 1.0
             key = (row["country"], row["industry"])
             groups.setdefault(key, []).append((row["sentiment"], weight))
 
@@ -652,15 +663,14 @@ async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, de
         result.sort(key=lambda x: x["avg_sentiment"], reverse=True)
         return result
 
-    # Group by label and compute decay-weighted average
+    # Group by label and compute average
     label_groups: dict[str, list[tuple[float, float]]] = {}
     for row in rows:
         label = row["label"]
         pub = row["published_at"]
         if pub is None:
             continue
-        age_days = (now - float(pub)) / 86400
-        weight = math.exp(-0.1 * age_days) if decay else 1.0
+        weight = 1.0
         label_groups.setdefault(label, []).append((row["sentiment"], weight))
 
     result = []
@@ -679,7 +689,7 @@ async def get_sentiment_bars(bar_type: str, threshold: float, days: int = 90, de
 
 
 async def get_sentiment_bar_articles(
-    bar_type: str, label: str, threshold: float, days: int = 90, decay: bool = True
+    bar_type: str, label: str, threshold: float, days: int = 90
 ) -> list[dict]:
     """Return individual articles contributing to a sentiment bar, ordered by contribution.
 
@@ -750,8 +760,7 @@ async def get_sentiment_bar_articles(
         pub = row["published_at"]
         if pub is None:
             continue
-        age_days = (now - float(pub)) / 86400
-        weight = math.exp(-0.1 * age_days) if decay else 1.0
+        weight = 1.0
         result.append({
             "title": row["title"] or row["url"],
             "url": row["url"],
@@ -811,6 +820,35 @@ async def get_article_missing_alias(alias: str) -> dict | None:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def get_company_scan_candidates(
+    last_id: int | None = None, limit: int = 200
+) -> list[dict]:
+    """Get a batch of company-scan candidates ordered by newest id first."""
+    threshold = float(await get_setting("scan_threshold") or "0.3")
+    db = await get_db()
+    try:
+        sql = """
+            SELECT a.id, a.url, a.content, a.scanned_aliases
+            FROM articles a
+            WHERE a.impact IS NOT NULL
+              AND a.impact >= ?
+              AND a.content IS NOT NULL
+              AND a.content != ''
+        """
+        params: list = [threshold]
+        if last_id is not None:
+            sql += " AND a.id < ?"
+            params.append(last_id)
+        sql += " ORDER BY a.id DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
     finally:
         await db.close()
 
@@ -975,19 +1013,22 @@ async def set_setting(key: str, value: str):
 
 
 async def prune_low_impact_articles() -> int:
-    """Delete articles with impact < 0.3 that are older than 5 days.
+    """Delete articles outside the configured memory window.
 
+    Deletes articles older than max_memory_days, and articles without a
+    published date.
     Also removes related results and company_results rows.
     Returns the number of articles deleted.
     """
     import time
-    cutoff = time.time() - 5 * 86400
+    max_memory_days = _coerce_max_memory_days(await get_setting("max_memory_days"))
+    cutoff = time.time() - max_memory_days * 86400
     db = await get_db()
     try:
         cursor = await db.execute(
             """SELECT id FROM articles
-               WHERE impact IS NOT NULL AND impact < 0.3
-                 AND published_at IS NOT NULL AND published_at < ?""",
+               WHERE published_at IS NULL
+                  OR published_at < ?""",
             (cutoff,),
         )
         ids = [row[0] for row in await cursor.fetchall()]
@@ -1042,23 +1083,21 @@ async def add_fundus_articles(articles: list[dict]) -> int:
 
 
 async def get_articles_needing_content(limit: int = 10) -> list[dict]:
-    """Return articles that need processing but have no content yet.
+    """Return articles that need content/date backfill.
 
-    Prioritizes impact-unscored articles (biggest backlog), then unclassified,
-    then unscanned.
+    Includes any article with missing/empty content or missing published_at.
     """
     db = await get_db()
     try:
         cursor = await db.execute(
             """
-            SELECT a.id, a.url FROM articles a
+            SELECT a.id, a.url, a.content, a.published_at
+            FROM articles a
             WHERE a.content IS NULL
-              AND (a.impact IS NULL
-                   OR NOT EXISTS (
-                       SELECT 1 FROM results r WHERE r.article_id = a.id
-                   ))
+               OR a.content = ''
+               OR a.published_at IS NULL
             ORDER BY
-                CASE WHEN a.impact IS NULL THEN 0 ELSE 1 END,
+                COALESCE(a.published_at, CAST(strftime('%s', a.fetched_at) AS INTEGER)) DESC,
                 a.fetched_at DESC
             LIMIT ?
         """,
@@ -1083,26 +1122,37 @@ async def store_article_content(article_id: int, content: str, published_at: str
         await db.close()
 
 
-async def clear_processed_content(model_count: int):
-    """NULL out content for articles that have been fully processed.
+async def delete_article(article_id: int):
+    """Delete one article and any related rows."""
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM results WHERE article_id = ?", (article_id,))
+        await db.execute(
+            "DELETE FROM company_results WHERE article_id = ?", (article_id,)
+        )
+        await db.execute("DELETE FROM articles WHERE id = ?", (article_id,))
+        await db.commit()
+    finally:
+        await db.close()
 
-    An article is considered processed when impact IS NOT NULL and it has
-    results from at least model_count distinct models.
+
+async def clear_processed_content(model_count: int):
+    """NULL out content for articles older than configured memory window.
+
+    Content deletion is age-based only.
     """
+    max_memory_days = _coerce_max_memory_days(await get_setting("max_memory_days"))
+    cutoff = time.time() - max_memory_days * 86400
     db = await get_db()
     try:
         await db.execute(
             """
             UPDATE articles SET content = NULL
             WHERE content IS NOT NULL
-              AND impact IS NOT NULL
-              AND id IN (
-                  SELECT article_id FROM results
-                  GROUP BY article_id
-                  HAVING COUNT(DISTINCT model) >= ?
-              )
+              AND published_at IS NOT NULL
+              AND published_at < ?
         """,
-            (model_count,),
+            (cutoff,),
         )
         await db.commit()
     finally:

@@ -78,10 +78,6 @@
 
         <!-- Charts (preserved across HTMX swaps) -->
         <div id="charts-card" class="dash-card">
-            <div class="chart-controls">
-                <label>Days <input type="number" id="chart-days" value="90" min="1" max="3650" style="width:60px;"></label>
-                <label><input type="checkbox" id="chart-decay" checked> Time decay</label>
-            </div>
             <h3>Sentiment by Country</h3>
             <div id="chart-country-bars" class="sentiment-bars"></div>
 
@@ -96,9 +92,6 @@
 
             <h3 style="margin-top:1.5rem;">Sentiment by Company</h3>
             <div id="chart-company-bars" class="sentiment-bars"></div>
-
-            <h3 style="margin-top:1.5rem;">Relevant Articles by Month</h3>
-            <div id="chart-articles-by-month"></div>
         </div>
 
         <!-- Feeds -->
@@ -131,6 +124,21 @@
                             <input type="url" name="url" value="{{ sentinel_url }}" placeholder="http://192.168.1.x:8000">
                             <button type="submit" class="btn btn-primary btn-sm">Save</button>
                             <span id="save-status" style="color: var(--green); font-size: 0.8rem;"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Memory Window</h4>
+                    <form hx-put="/api/settings/memory" hx-swap="none"
+                          hx-on::after-request="document.getElementById('memory-status').textContent = 'Saved'; setTimeout(() => document.getElementById('memory-status').textContent = '', 2000)">
+                        <div class="settings-field">
+                            <label>Max Memory (days)</label>
+                            <input type="number" name="max_memory_days" value="{{ max_memory_days }}" min="1" max="120" step="1" style="max-width:100px;">
+                        </div>
+                        <div class="form-row">
+                            <button type="submit" class="btn btn-primary btn-sm">Save Memory</button>
+                            <span id="memory-status" style="color: var(--green); font-size: 0.8rem;"></span>
                         </div>
                     </form>
                 </div>
@@ -190,10 +198,12 @@
                 </div>
 
                 <div class="settings-group">
-                    <h4>Fundus Publishers</h4>
-                    <div id="fundus-publishers">
-                        <p style="color: var(--text-dim); font-size: 0.8rem;">Loading publishers...</p>
-                    </div>
+                    <details>
+                        <summary>Fundus Publishers</summary>
+                        <div id="fundus-publishers" style="margin-top: 0.5rem;">
+                            <p style="color: var(--text-dim); font-size: 0.8rem;">Loading publishers...</p>
+                        </div>
+                    </details>
                     <div class="form-row" style="margin-top: 0.5rem;">
                         <button class="btn btn-primary btn-sm" onclick="saveFundusPublishers()">Save</button>
                         <button class="btn btn-sm" style="background: var(--green); color: white;" onclick="triggerFundusCrawl(this)">Crawl Now</button>
@@ -318,12 +328,11 @@
         }
 
         function openArticleModal(barType, label) {
-            var p = chartParams();
             var modal = document.getElementById('article-modal');
             document.getElementById('modal-title').textContent = label + ' (' + barType + ')';
             document.getElementById('modal-body').innerHTML = '<span style="color:#8888a0">Loading...</span>';
             modal.style.display = 'flex';
-            fetch('/api/charts/sentiment-bar-articles?type=' + encodeURIComponent(barType) + '&label=' + encodeURIComponent(label) + p)
+            fetch('/api/charts/sentiment-bar-articles?type=' + encodeURIComponent(barType) + '&label=' + encodeURIComponent(label))
                 .then(function(r) { return r.json(); })
                 .then(function(articles) {
                     if (!articles.length) {
@@ -354,47 +363,18 @@
             openArticleModal(row.dataset.type, row.dataset.label);
         });
 
-        function chartParams() {
-            var days = document.getElementById('chart-days').value || '90';
-            var decay = document.getElementById('chart-decay').checked;
-            return '&days=' + days + '&decay=' + decay;
-        }
-
-        document.getElementById('chart-days').addEventListener('change', refreshBarCharts);
-        document.getElementById('chart-decay').addEventListener('change', refreshBarCharts);
-
-        function renderArticlesByMonth(container, data) {
-            if (!data.length) { container.innerHTML = '<span style="color:#8888a0;font-size:0.8rem">No data</span>'; return; }
-            var maxCount = 0;
-            for (var i = 0; i < data.length; i++) { if (data[i].count > maxCount) maxCount = data[i].count; }
-            var html = '';
-            for (var i = 0; i < data.length; i++) {
-                var d = data[i];
-                var pct = maxCount > 0 ? (d.count / maxCount) * 100 : 0;
-                html += '<div class="sbar-row">'
-                    + '<span class="sbar-label">' + d.month + '</span>'
-                    + '<div class="sbar-track"><div class="sbar-fill" style="left:0;width:' + pct + '%;background:#6366f1"></div></div>'
-                    + '<span class="sbar-val">' + d.count + '</span>'
-                    + '</div>';
-            }
-            container.innerHTML = html;
-        }
-
         function refreshBarCharts() {
-            var p = chartParams();
             Promise.all([
-                fetch('/api/charts/sentiment-bars?type=country' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=industry' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=company' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/sentiment-bars?type=detailed' + p).then(function(r) { return r.json(); }),
-                fetch('/api/charts/articles-by-month').then(function(r) { return r.json(); })
+                fetch('/api/charts/sentiment-bars?type=country').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=industry').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=company').then(function(r) { return r.json(); }),
+                fetch('/api/charts/sentiment-bars?type=detailed').then(function(r) { return r.json(); })
             ]).then(function(results) {
                 renderBarChart(document.getElementById('chart-country-bars'), results[0], 'country');
                 renderBarChart(document.getElementById('chart-industry-bars'), results[1], 'industry');
                 renderBarChart(document.getElementById('chart-company-bars'), results[2], 'company');
                 renderGroupedCharts(document.getElementById('chart-industries-by-country'), results[3], 'country', 'industry');
                 renderGroupedCharts(document.getElementById('chart-countries-by-industry'), results[3], 'industry', 'country');
-                renderArticlesByMonth(document.getElementById('chart-articles-by-month'), results[4]);
             }).catch(function(e) { console.error('Bar chart refresh failed:', e); });
         }
 
