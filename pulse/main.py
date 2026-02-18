@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 
 import uvicorn
 
@@ -16,6 +18,9 @@ def main():
         port=8100,
         log_level="info",
     )
+    # Force exit — background threads (fundus crawler, stats sampler) can
+    # outlive uvicorn's shutdown and keep the process alive as a zombie.
+    os._exit(0)
 
 
 if __name__ == "__main__":

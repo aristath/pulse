@@ -21,7 +21,7 @@ dependencies = [
     "psutil>=5.9.0",
     "spacy>=3.7.0",
     "rapidfuzz>=3.0.0",
-    "fundus>=0.5.0",
+    "fundus>=0.5.5",
 ]
 
 [project.scripts]
