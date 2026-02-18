@@ -26,11 +26,11 @@ def _coerce_max_memory_days(raw: str | None) -> int:
 def _credibility_multiplier(article_count: int) -> float:
     """Scale sentiment confidence from 0.1..1.0 based on article count.
 
-    1 article => 0.1, 2 => 0.2, ..., 10+ => 1.0
+    1-2 articles => 0.0, 3 => 0.1, ..., 12+ => 1.0
     """
-    if article_count <= 0:
+    if article_count <= 2:
         return 0.0
-    return min(article_count, 10) / 10.0
+    return min(article_count - 2, 10) / 10.0
 
 
 def _normalize_date(value) -> int | None:
