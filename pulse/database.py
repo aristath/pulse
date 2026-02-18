@@ -475,22 +475,17 @@ async def get_stats(model_count: int = 1) -> dict:
                 )
             ).fetchone()
         )[0]
-        # "Fully scanned" = scanned_aliases has the max alias count
-        max_alias_count = (
-            await (
-                await db.execute(
-                    "SELECT MAX(json_array_length(scanned_aliases)) FROM articles WHERE scanned_aliases IS NOT NULL"
-                )
-            ).fetchone()
-        )[0] or 0
+        # "Scanned" = has scanned_aliases; the scanner handles incremental
+        # re-scans when the alias list changes.
         company_scanned = (
             await (
                 await db.execute(
-                    "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL AND json_array_length(scanned_aliases) >= ?",
-                    (max_alias_count,),
+                    "SELECT COUNT(*) FROM articles WHERE scanned_aliases IS NOT NULL"
+                    " AND impact IS NOT NULL AND impact >= ?",
+                    (scan_threshold,),
                 )
             ).fetchone()
-        )[0] if max_alias_count > 0 else 0
+        )[0]
         company_mentions = (
             await (await db.execute("SELECT COUNT(*) FROM company_results")).fetchone()
         )[0]
